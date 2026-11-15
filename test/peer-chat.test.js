@@ -188,6 +188,18 @@ test('held peer message is shown as held', async () => {
   assert.deepEqual(init.log.map(e => [e.kind, e.text]), [['user', 'start'], ['held', 'hello there']]);
 });
 
+test('failed send tells open panels at once', async () => {
+  const s = sess({ pipe: h.pipePath() });
+  h.transcript(s.sid, [uLine(s.sid, 'start')]);
+  const st = await h.peerStream(s.sid); const init = await initOf(st);
+  assert.equal(init.meta.canSend, true);
+  assert.equal((await h.send(s.sid, { text: 'hi' })).status, 502);
+  await wait(60);
+  const got = st.of('meta').some(m => m.canSend === false);
+  st.close();
+  assert.ok(got, 'meta canSend:false arrived with the 502, not on a later tick');
+});
+
 test('init cap', async () => {
   const sid = crypto.randomUUID();
   h.transcript(sid, Array.from({ length: 250 }, (_, i) => uLine(sid, 'line ' + (i + 1))));

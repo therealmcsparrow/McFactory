@@ -105,13 +105,12 @@
     const peer = mode === 'peer';
     stopBtn.hidden = peer; nowWrap.hidden = !peer; nowCb.checked = false; noteEl.textContent = NOTE[mode]; headCost.textContent = '';
     input.disabled = sendBtn.disabled = true; input.placeholder = 'Message, Enter to send, Shift+Enter for a new line';
-    const c = cur = { id, mode, es: null, meta: null, pendKey: '', last: 0, ro: '' };
+    const c = cur = { id, mode, es: null, meta: null, pendKey: '', last: 0 };
     const es = c.es = new EventSource(`/api/${peer ? 'peer' : 'chat'}/${encodeURIComponent(id)}/stream?token=${encodeURIComponent(TOKEN)}`);
     es.addEventListener('init', e => { if (cur !== c) return; const d = JSON.parse(e.data); logEl.replaceChildren(); c.last = 0; for (const x of d.log) addLog(x); c.meta = d.meta; c.pendKey = ''; paint(); scrollDown(true); maybeFocus(); });
     es.addEventListener('entry', e => { if (cur !== c) return; addLog(JSON.parse(e.data)); });
     es.addEventListener('meta', e => {
       if (cur !== c) return; const m = JSON.parse(e.data);
-      if (peer && c.meta && c.meta.canSend === false && m.canSend === true) c.ro = ''; // the server unlocked it (status or process changed)
       c.meta = m; paint(); maybeFocus();
     });
     es.onerror = () => { if (cur === c && es.readyState === 2) { errEl.textContent = peer ? 'Chat stream closed.' : 'Chat stream closed. This session is no longer tracked by the dashboard.'; } };
@@ -144,7 +143,7 @@
   function paint() {
     const m = cur && cur.meta; if (!m) return;
     if (cur.mode === 'peer') {
-      const ro = m.live === false ? 'Session closed: read-only' : m.canSend === false ? 'Sending is not available for this session right now: read-only' : cur.ro;
+      const ro = m.live === false ? 'Session closed: read-only' : m.canSend === false ? 'Sending is not available for this session right now: read-only' : ''; // the server's meta is the only lock
       head.dataset.s = m.live === false ? 'ended' : m.status === 'busy' ? 'busy' : m.status === 'waiting' ? 'ask' : 'idle';
       headTxt.textContent = m.live === false ? 'Closed' : m.status === 'busy' ? 'Working…' : m.status === 'waiting' ? 'Needs you' : 'Idle';
       input.disabled = sendBtn.disabled = nowCb.disabled = !!ro;
@@ -168,7 +167,7 @@
       if (peer) await post(`/api/peer/${encodeURIComponent(c.id)}/send`, { text, priority: nowCb.checked ? 'now' : 'next' });
       else await post(`/api/chat/${encodeURIComponent(c.id)}/send`, { text });
       input.value = ''; input.style.height = ''; nowCb.checked = false;
-    } catch (e) { errEl.textContent = e.message; if (peer && (e.status === 502 || e.status === 404)) c.ro = 'Sending is not available for this session right now: read-only'; }
+    } catch (e) { errEl.textContent = e.message; } // a 502 locks via the server's meta push; a 404 only shows the error
     finally {
       if (cur === c && peer) paint();
       else if (cur && cur.meta && cur.meta.alive) sendBtn.disabled = false;

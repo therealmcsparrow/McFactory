@@ -950,6 +950,11 @@ function tailOpen(sid) {
   t.meta = tailMeta(t); t.live = t.meta.live;
   peerTails.set(sid, t); return t;
 }
+function peerMetaNow(sid) { // push a changed meta to open panels now, so a later state change cannot hide it before the next tick
+  const t = peerTails.get(sid); if (!t) return;
+  const m = tailMeta(t);
+  if (JSON.stringify(m) !== JSON.stringify(t.meta)) { t.meta = m; for (const r of t.listeners) sse(r, 'meta', m); }
+}
 function peerTick() { // every second: new transcript lines and state changes to the open panels
   for (const t of peerTails.values()) {
     if (!t.fp) t.fp = peerFile(t.sid);
@@ -991,7 +996,7 @@ async function peerRoute(req, res, u) {
     const st = peerOf(sid), now = Date.now();
     if (now - st.lastSend < PEER_RATE_MS) throw new HttpErr(429, 'one message per second');
     st.lastSend = now; st.seen = target.pid + ':' + target.status;
-    try { await peerSend(target, text, priority); } catch (e) { if (st.canSend) { st.canSend = false; version++; } throw e; }
+    try { await peerSend(target, text, priority); } catch (e) { if (st.canSend) { st.canSend = false; version++; } peerMetaNow(sid); throw e; }
     if (!st.canSend) { st.canSend = true; version++; }
     st.sentTexts.push(text); if (st.sentTexts.length > PEER_SENT) st.sentTexts.shift();
     return sendJson(res, 200, { ok: true });
