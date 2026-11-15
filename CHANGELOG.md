@@ -4,6 +4,8 @@ All notable changes to this project are listed here.
 
 ## Unreleased
 
+## 0.1.2 - 2026-11-15
+
 ### Fixed
 
 -   A new robot arm no longer appears inside another arm: it waits until its spot on the line is empty.
