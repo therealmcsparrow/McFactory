@@ -512,6 +512,28 @@ function findClaude() {
   for (const d of (process.env.PATH || '').split(path.delimiter)) { if (!d) continue; const p = path.join(d, exe); if (isFile(p)) return p; }
   return path.join(os.homedir(), '.local', 'bin', exe);
 }
+const DIRS_MAX = 2000;
+function listDirs(p) { // folder browser for the New session dialog: subfolder names only, never file names or contents
+  if (!p) {
+    const roots = [os.homedir()];
+    if (process.platform === 'win32') { for (let c = 67; c <= 90; c++) { const d = String.fromCharCode(c) + ':\\'; try { if (fs.statSync(d).isDirectory()) roots.push(d); } catch { } } }
+    else roots.push('/');
+    return { path: '', parent: '', dirs: [], roots };
+  }
+  if (p.length > 600 || p.includes('\0') || !path.isAbsolute(p)) throw new HttpErr(400, 'path must be absolute');
+  const abs = path.resolve(p);
+  let ents; try { if (!fs.statSync(abs).isDirectory()) throw 0; ents = fs.readdirSync(abs, { withFileTypes: true }); } catch { throw new HttpErr(404, 'folder not found'); }
+  const out = [];
+  for (const d of ents) {
+    if (out.length >= DIRS_MAX) break;
+    let ok = d.isDirectory();
+    if (!ok && d.isSymbolicLink()) try { ok = fs.statSync(path.join(abs, d.name)).isDirectory(); } catch { }
+    if (ok) out.push(d.name);
+  }
+  out.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  const parent = path.dirname(abs);
+  return { path: abs, parent: parent === abs ? '' : parent, dirs: out, roots: [] };
+}
 function validCwd(cwd) {
   if (typeof cwd !== 'string' || !cwd || cwd.length > 600 || cwd.includes('\0')) throw new HttpErr(400, 'cwd must be an absolute path');
   if (!path.isAbsolute(cwd) || /^[\\/]{2}/.test(cwd)) throw new HttpErr(400, 'cwd must be a local absolute path');
@@ -526,8 +548,15 @@ function toolSummary(name, inp) {
   const v = inp.command || inp.file_path || inp.path || inp.pattern || inp.url || inp.query || inp.description || inp.prompt || '';
   return clip(String(v).replace(/\s+/g, ' '), 100);
 }
+// slash command names from the session's init line: names only, checked, capped, sorted
+function cmdList(v) {
+  if (!Array.isArray(v)) return [];
+  const out = new Set();
+  for (const x of v) { if (out.size >= 500) break; const n = String(typeof x === 'string' ? x : x && x.name || '').replace(/^\//, ''); if (/^[\w:.-]{1,80}$/.test(n)) out.add(n); }
+  return [...out].sort((a, b) => a.localeCompare(b));
+}
 function metaOf(c) {
-  return { id: c.id, cwd: c.cwd, model: c.model || 'default', effort: c.effort || 'default', alive: c.alive, busy: c.busy, cost: c.cost, startedAt: c.startedAt,
+  return { id: c.id, cwd: c.cwd, model: c.model || 'default', effort: c.effort || 'default', alive: c.alive, busy: c.busy, cost: c.cost, startedAt: c.startedAt, commands: c.commands || null,
     pending: [...c.pending.values()].map(r => ({ request_id: r.request_id, tool_name: r.tool_name, display_name: r.display_name, description: r.description, ts: r.ts,
       summary: toolSummary(r.tool_name, r.input), questions: r.tool_name === 'AskUserQuestion' ? r.input.questions : null,
       preview: r.tool_name === 'AskUserQuestion' ? '' : clip(JSON.stringify(r.input, null, 1), 1500) })) };
@@ -548,7 +577,7 @@ function onLine(c, line) {
   let o; try { o = JSON.parse(line); } catch { return; }
   if (!o || typeof o !== 'object') return;
   if (o.session_id && !c.id) { c.id = String(o.session_id); chats.set(c.id, c); if (c.onId) { c.onId(c); c.onId = null; } }
-  if (o.type === 'system' && o.subtype === 'init') { if (o.model) c.model = String(o.model); touch(c); return; }
+  if (o.type === 'system' && o.subtype === 'init') { if (o.model) c.model = String(o.model); c.commands = cmdList(o.slash_commands); touch(c); return; }
   if (o.type === 'assistant' && o.message && Array.isArray(o.message.content)) {
     for (const b of o.message.content) {
       if (!b) continue;
@@ -1017,6 +1046,12 @@ const server = http.createServer((req, res) => {
   if (u.pathname.startsWith('/api/ext/')) { extRoute(req, res, u); return; }
   if (u.pathname.startsWith('/api/peer/')) { peerRoute(req, res, u); return; }
   if (u.pathname === '/hook/permission' || u.pathname === '/hook/pretool') { hookRoute(req, res, u); return; }
+  if (u.pathname === '/api/fs/dirs') {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'GET only' });
+    if (!tokenOk(req.headers['x-chat-token'])) return sendJson(res, 403, { error: 'bad token' });
+    try { return sendJson(res, 200, listDirs(u.searchParams.get('path') || '')); }
+    catch (e) { return sendJson(res, e instanceof HttpErr ? e.code : 500, { error: e instanceof HttpErr ? e.message : 'cannot read that folder' }); }
+  }
   if (u.pathname === '/api/refresh') {
     // hard refresh of the data (not the page): rescan the folders and session files now, re-push every stream
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
