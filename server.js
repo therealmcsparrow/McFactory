@@ -1001,6 +1001,16 @@ const server = http.createServer((req, res) => {
   if (u.pathname.startsWith('/api/ext/')) { extRoute(req, res, u); return; }
   if (u.pathname.startsWith('/api/peer/')) { peerRoute(req, res, u); return; }
   if (u.pathname === '/hook/permission' || u.pathname === '/hook/pretool') { hookRoute(req, res, u); return; }
+  if (u.pathname === '/api/refresh') {
+    // hard refresh of the data (not the page): rescan the folders and session files now, re-push every stream
+    if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
+    if (!tokenOk(req.headers['x-chat-token'])) return sendJson(res, 403, { error: 'bad token' });
+    rescanAt = 0; liveKey = '';
+    const t0 = Date.now(); do pump(); while (dirtyFiles.size && Date.now() - t0 < 1500);
+    version++;
+    for (const c of clients) { c.last = ''; try { push(c); } catch { clients.delete(c); } }
+    return sendJson(res, 200, { ok: true });
+  }
   const hours = u.searchParams.get('hours') || DEFAULT_HOURS;
   if (u.pathname === '/api/state') {
     const s = snapshot(hours);

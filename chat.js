@@ -326,7 +326,23 @@
   });
   const newBtn = h('button', { id: 'chat-new', class: 'chat-new', type: 'button', 'aria-haspopup': 'dialog', onclick: openDialog }, h('span', { 'aria-hidden': 'true' }), 'New session');
   newBtn.firstChild.innerHTML = '<svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>';
-  (() => { const w = $('#win'); if (w) w.insertAdjacentElement('afterend', newBtn); else document.body.append(newBtn); })();
+  // Refresh: hard refresh of the data and connections, not the page (server rescans now; every open stream reopens)
+  const refBtn = h('button', { id: 'chat-refresh', class: 'chat-new chat-ref', type: 'button', title: 'Rescan sessions and reconnect (keeps the page)', 'aria-label': 'Refresh data and connections' }, h('span', { 'aria-hidden': 'true' }), h('span', { class: 'lbl', text: 'Refresh' }));
+  refBtn.firstChild.innerHTML = '<svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M10.2 4.2A4.5 4.5 0 1 0 10.5 7.5M10.5 1.5v3h-3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>';
+  refBtn.addEventListener('click', async () => {
+    if (refBtn.disabled) return;
+    const lbl = refBtn.querySelector('.lbl'); refBtn.disabled = true; lbl.textContent = 'Refreshing…'; refBtn.removeAttribute('data-err');
+    try {
+      await post('/api/refresh');
+      DS.reconnect();
+      reopen();
+      if (ecur) { const id = ecur.id; closeExt(); showExt(id); }
+      lbl.textContent = 'Refreshed';
+    } catch (e) { lbl.textContent = 'Refresh failed'; refBtn.dataset.err = ''; refBtn.title = e.message; }
+    setTimeout(() => { lbl.textContent = 'Refresh'; refBtn.disabled = false; }, 1200);
+  });
+  const acts = h('div', { class: 'chat-acts' }, newBtn, refBtn);
+  (() => { const w = $('#win'); if (w) w.insertAdjacentElement('afterend', acts); else document.body.append(acts); })();
   DS.subscribe(state => {
     const m = new Map(); const n = [];
     for (const p of state.projects) for (const t of p.tasks) if (t.owned) { m.set(t.id, { task: t, project: p }); if (t.chat && t.chat.pending > 0) n.push(t); }
