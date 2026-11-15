@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const http = require('http');
+const net = require('net');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 
@@ -317,7 +318,7 @@ function readLive() {
   for (const n of names) {
     let o; try { o = JSON.parse(fs.readFileSync(path.join(SESS_DIR, n), 'utf8')); } catch { continue; }
     if (!o || !o.sessionId || (o.pid && !alive(o.pid))) continue;
-    ps.add(String(o.sessionId));
+    ps.add(String(o.sessionId)); peerSeen(String(o.sessionId), o.pid, String(o.status || ''));
     if (!o.status) continue;
     const at = +o.statusUpdatedAt || +o.updatedAt || 0, prev = m.get(o.sessionId);
     if (!prev || at > prev.since) m.set(o.sessionId, { status: String(o.status), waitingFor: o.waitingFor ? String(o.waitingFor) : '', since: at });
@@ -451,7 +452,8 @@ function buildSnapshot(hours) {
     t.status = st.includes('running') ? 'running' : st.includes('waiting') ? 'waiting' : st.includes('failed') && t.agents[0].status === 'failed' ? 'failed' : 'done';
     t.endedAt = t.status === 'done' || t.status === 'failed' ? Math.max(...t.agents.map(x => x.lastActivity)) : null;
     t.lastActivity = Math.max(...t.agents.map(x => x.lastActivity));
-    { const oc = chats.get(t.id); t.owned = !!oc; t.chat = oc ? { alive: oc.alive, busy: oc.busy, pending: oc.pending.size } : null; const ep = ext.get(t.id); t.ext = ep && ep.size ? { pending: ep.size } : null; } // flags only, never text
+    { const oc = chats.get(t.id); t.owned = !!oc; t.chat = oc ? { alive: oc.alive, busy: oc.busy, pending: oc.pending.size } : null; const ep = ext.get(t.id); t.ext = ep && ep.size ? { pending: ep.size } : null;
+      const ps = peerState.get(t.id); t.peer = !oc && procs.has(t.id) ? { live: true, canSend: ps ? ps.canSend : true } : null; } // flags only, never text
     // open = a live Claude Code process holds the session (~/.claude/sessions/<pid>.json, pid alive), else recent transcript activity
     t.openBy = procs.has(t.id) ? 'process' : now - t.lastActivity < OPEN_MS ? 'recent' : null;
     t.closed = !t.openBy; if (t.closed) t.endedAt = t.lastActivity;
@@ -811,8 +813,87 @@ async function extRoute(req, res, u) {
   }
 }
 
+// ───────────── peer chat (terminal/desktop sessions, over their local messaging pipe)
+// Every live Claude Code session listens on a pipe named in ~/.claude/sessions/<pid>.json (messagingSocketPath).
+// We write NDJSON: {"type":"auth","token":<peerToken from <pid>.<64hex>.key>} then one {"type":"user",...} line.
+// The session shows it as a message from another Claude session (a teammate, never the user's approval).
+// The peer token is read per send and only ever written to that pipe: never logged, cached or sent to the page.
+const PEER_PIPE_RE = /^\\\\\.\\pipe\\LOCAL\\cc-msg-[0-9a-f]{32}$/;
+const PEER_TOKEN_RE = /^[0-9a-f]{32}$/;
+const PEER_MAX_TEXT = 50000, PEER_SEND_MS = 5000, PEER_RATE_MS = 1000, PEER_SENT = 50;
+const peerState = new Map(); // sessionId -> {canSend, lastSend, sentTexts, seen}
+function peerOf(sid) { let s = peerState.get(sid); if (!s) peerState.set(sid, s = { canSend: true, lastSend: 0, sentTexts: [], seen: '' }); return s; }
+function peerPipeOk(p) {
+  if (typeof p !== 'string' || !p) return false;
+  if (process.platform === 'win32') return PEER_PIPE_RE.test(p);
+  const r = path.resolve(p); return path.dirname(r) === SESS_DIR && /^cc-msg-[\w.-]{1,80}$/.test(path.basename(r));
+}
+function peerTarget(sid) { // -> {pid, pipe, cwd, entrypoint, status} | null: a live session with a valid pipe, read fresh
+  let names; try { names = fs.readdirSync(SESS_DIR).filter(n => /^\d+\.json$/.test(n)); } catch { return null; }
+  let best = null;
+  for (const n of names) {
+    let o; try { o = JSON.parse(fs.readFileSync(path.join(SESS_DIR, n), 'utf8')); } catch { continue; }
+    if (!o || String(o.sessionId) !== sid || !Number.isInteger(o.pid) || o.pid <= 0 || !alive(o.pid) || !peerPipeOk(o.messagingSocketPath)) continue;
+    const at = +o.startedAt || 0;
+    if (!best || at > best.at) best = { pid: o.pid, pipe: o.messagingSocketPath, cwd: String(o.cwd || ''), entrypoint: String(o.entrypoint || ''), status: String(o.status || ''), at };
+  }
+  if (best) delete best.at;
+  return best;
+}
+function peerKey(pid) { // -> peerToken | null. Newest <pid>.<64hex>.key; never cached
+  const re = new RegExp('^' + pid + '\\.[0-9a-f]{64}\\.key$');
+  let names; try { names = fs.readdirSync(SESS_DIR).filter(n => re.test(n)); } catch { return null; }
+  let best = null, at = -1;
+  for (const n of names) { try { const m = fs.statSync(path.join(SESS_DIR, n)).mtimeMs; if (m > at) { at = m; best = n; } } catch { } }
+  if (!best) return null;
+  try { const k = JSON.parse(fs.readFileSync(path.join(SESS_DIR, best), 'utf8')); return k && typeof k.peerToken === 'string' && PEER_TOKEN_RE.test(k.peerToken) ? k.peerToken : null; } catch { return null; }
+}
+function peerSend(target, text, priority) { // resolves when the session closed the pipe cleanly; rejects HttpErr(502)
+  return new Promise((resolve, reject) => {
+    const tk = peerKey(target.pid);
+    if (!tk) return reject(new HttpErr(502, 'session key unavailable'));
+    const payload = JSON.stringify({ type: 'auth', token: tk }) + '\n' + JSON.stringify({ type: 'user', message: { role: 'user', content: text }, priority }) + '\n';
+    let done = false, timer = null;
+    const sock = net.connect(target.pipe, () => { sock.end(payload); });
+    const finish = why => { if (done) return; done = true; clearTimeout(timer); if (why) { sock.destroy(); reject(new HttpErr(502, why)); } else resolve(); };
+    timer = setTimeout(() => finish('session did not take the message in time'), PEER_SEND_MS);
+    sock.on('data', () => { }); // nothing is expected back
+    sock.on('error', e => finish('session pipe refused the message (' + (e.code || 'error') + ')'));
+    sock.on('close', hadErr => finish(hadErr ? 'session pipe closed with an error' : null));
+  });
+}
+function peerSeen(sid, pid, status) { // from readLive: a session that changed state may accept messages again
+  const s = peerState.get(sid); if (!s) return;
+  const k = pid + ':' + status; if (s.seen !== k) { s.seen = k; if (!s.canSend) { s.canSend = true; version++; } }
+}
+async function peerRoute(req, res, u) {
+  try {
+    const m = /^\/api\/peer\/([\w-]{1,64})\/send$/.exec(u.pathname);
+    if (!m) return sendJson(res, 404, { error: 'not found' });
+    const sid = m[1];
+    if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
+    if (!tokenOk(req.headers['x-chat-token'])) return sendJson(res, 403, { error: 'bad token' });
+    const body = await readJson(req) || {};
+    const text = body.text, priority = body.priority === undefined ? 'next' : body.priority;
+    if (typeof text !== 'string' || !text.length || text.length > PEER_MAX_TEXT) throw new HttpErr(400, 'text must be 1-' + PEER_MAX_TEXT + ' characters');
+    if (priority !== 'next' && priority !== 'now') throw new HttpErr(400, 'priority must be "next" or "now"');
+    if (chats.has(sid)) throw new HttpErr(404, 'owned session: use /api/chat');
+    const target = peerTarget(sid); if (!target) throw new HttpErr(404, 'no live terminal or desktop session with this id');
+    const st = peerOf(sid), now = Date.now();
+    if (now - st.lastSend < PEER_RATE_MS) throw new HttpErr(429, 'one message per second');
+    st.lastSend = now; st.seen = target.pid + ':' + target.status;
+    try { await peerSend(target, text, priority); } catch (e) { if (st.canSend) { st.canSend = false; version++; } throw e; }
+    if (!st.canSend) { st.canSend = true; version++; }
+    st.sentTexts.push(text); if (st.sentTexts.length > PEER_SENT) st.sentTexts.shift();
+    return sendJson(res, 200, { ok: true });
+  } catch (e) {
+    if (e instanceof HttpErr) return sendJson(res, e.code, { error: e.message });
+    console.error('peer error:', e && e.message); return sendJson(res, 500, { error: 'internal error' });
+  }
+}
+
 // ───────────── http
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.md': 'text/plain; charset=utf-8' };
+const MIME ={ '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.md': 'text/plain; charset=utf-8' };
 const STATIC = new Set(['index.html', 'live-data.js', 'chat.js', 'chat.css']);
 const clients = new Set();
 const server = http.createServer((req, res) => {
@@ -820,6 +901,7 @@ const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost');
   if (u.pathname.startsWith('/api/chat/')) { chatRoute(req, res, u); return; }
   if (u.pathname.startsWith('/api/ext/')) { extRoute(req, res, u); return; }
+  if (u.pathname.startsWith('/api/peer/')) { peerRoute(req, res, u); return; }
   if (u.pathname === '/hook/permission' || u.pathname === '/hook/pretool') { hookRoute(req, res, u); return; }
   const hours = u.searchParams.get('hours') || DEFAULT_HOURS;
   if (u.pathname === '/api/state') {

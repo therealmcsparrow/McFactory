@@ -1,1 +1,1 @@
-{ "name": "claude-factory-live", "private": true, "type": "commonjs" }
+{ "name": "claude-factory-live", "private": true, "type": "commonjs", "scripts": { "test": "node --test \"test/*.test.js\"" } }
