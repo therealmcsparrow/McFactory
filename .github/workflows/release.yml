@@ -58,7 +58,11 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p out
-          cp desktop/src-tauri/target/release/bundle/nsis/*.exe out/
+          # GitHub turns spaces in asset names into dots, so name the file that way before the checksum
+          for f in desktop/src-tauri/target/release/bundle/nsis/*.exe; do
+            b="$(basename "$f")"
+            cp "$f" "out/${b// /.}"
+          done
           (cd out && sha256sum *.exe > SHA256SUMS.txt)
           ls -l out
 
