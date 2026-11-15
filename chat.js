@@ -73,8 +73,9 @@
   // ───────── chat panel (a sibling of #detail-body, so detail re-renders never wipe the input)
   const detailEl = $('#detail');
   const headDot = h('i', { class: 'dot' }), headTxt = h('span', { class: 'grow2' }), headCost = h('span');
+  const headSkip = h('span', { class: 'chat-skip', title: 'Started with --dangerously-skip-permissions: Claude runs every tool without asking', hidden: true }, '⚠ no prompts');
   const stopBtn = h('button', { class: 'cb-btn bad', type: 'button', text: 'Stop', 'aria-label': 'Stop this session', onclick: () => stop() });
-  const head = h('div', { class: 'chat-head', 'data-s': 'idle' }, headDot, headTxt, headCost, stopBtn);
+  const head = h('div', { class: 'chat-head', 'data-s': 'idle' }, headDot, headTxt, headSkip, headCost, stopBtn);
   const logEl = h('div', { class: 'chat-log', role: 'log', 'aria-live': 'polite', 'aria-relevant': 'additions', 'aria-label': 'Chat log', tabindex: '0' });
   const pendEl = h('div', { class: 'chat-pend', 'aria-label': 'Requests waiting for you' });
   const errEl = h('div', { class: 'chat-err', role: 'alert' });
@@ -177,6 +178,7 @@
   }
   function paint() {
     const m = cur && cur.meta; if (!m) return;
+    headSkip.hidden = !(cur.mode === 'owned' && m.skipPermissions);
     if (cur.mode === 'peer') {
       const ro = m.live === false ? 'Session closed: read-only' : m.canSend === false ? 'Sending is not available for this session right now: read-only' : ''; // the server's meta is the only lock
       head.dataset.s = m.live === false ? 'ended' : m.status === 'busy' ? 'busy' : m.status === 'waiting' ? 'ask' : 'idle';
@@ -352,6 +354,17 @@
   fbUse.addEventListener('click', () => { if (!fbPath) return; pathIn.value = fbPath; syncSel(); fbToggle(false); pathIn.focus(); });
   const modelSel = h('select', { id: 'cn-model', 'aria-label': 'Model' }, [['', 'Default'], ['haiku', 'Haiku'], ['sonnet', 'Sonnet'], ['opus', 'Opus']].map(([v, l]) => h('option', { value: v, text: l })));
   const effortSel = h('select', { id: 'cn-effort', 'aria-label': 'Effort' }, [['', 'Default'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'X-high'], ['max', 'Max']].map(([v, l]) => h('option', { value: v, text: l })));
+  // --dangerously-skip-permissions: off every time the dialog opens, never remembered
+  const skipCb = h('input', { type: 'checkbox', id: 'cn-skip', 'aria-describedby': 'cn-skip-warn' });
+  const skipWarn = h('p', { id: 'cn-skip-warn', class: 'cn-skip-warn', hidden: true, text: '⚠ Claude will edit files, run commands and use every tool in this folder without asking you first, and you will see no permission cards here. Only use this in a folder you trust, ideally a throwaway copy.' });
+  const skipRow = h('div', { class: 'cn-skip' }, h('label', { class: 'cn-skip-l' }, skipCb, ' Skip permission prompts (--dangerously-skip-permissions)'), skipWarn);
+  const hintEl = h('div', { class: 'cn-hint' });
+  function syncSkip() {
+    skipWarn.hidden = !skipCb.checked; skipRow.classList.toggle('on', skipCb.checked);
+    hintEl.textContent = skipCb.checked ? 'Claude runs in that folder and asks no permission. Ctrl+Enter starts it.' : 'Claude runs in that folder with the dashboard answering permission prompts. Ctrl+Enter starts it.';
+    if (!goBtn.disabled) goBtn.textContent = skipCb.checked ? 'Start without prompts' : 'Start session';
+  }
+  skipCb.addEventListener('change', syncSkip);
   const promptIn = h('textarea', { id: 'cn-prompt', rows: 4, 'aria-label': 'First message', placeholder: 'What should Claude do?', spellcheck: 'false' });
   const cnErr = h('div', { class: 'cn-err', role: 'alert' });
   const goBtn = h('button', { class: 'cb-btn pri', type: 'submit', text: 'Start session' });
@@ -361,7 +374,7 @@
     lab('Project', projSel), pathWrap, fb,
     h('div', { class: 'cn-row' }, lab('Model', modelSel), lab('Effort', effortSel)),
     lab('First message', promptIn),
-    h('div', { class: 'cn-hint', text: 'Claude runs in that folder with the dashboard answering permission prompts. Ctrl+Enter starts it.' }),
+    skipRow, hintEl,
     cnErr, h('div', { class: 'cn-act' }, cancelBtn, goBtn));
   const dlg = h('dialog', { class: 'cn', 'aria-labelledby': 'cn-title' }, h('div', { class: 'cn-box' }, h('h2', { id: 'cn-title', text: 'New session' }), h('p', { text: 'Starts a Claude Code session you can chat with from here.' }), formEl));
   document.body.append(dlg);
@@ -388,7 +401,7 @@
   }
   function openDialog() {
     fillProjects(); modelSel.value = LS.get('chat.model'); effortSel.value = LS.get('chat.effort');
-    cnErr.textContent = ''; goBtn.disabled = false; goBtn.textContent = 'Start session';
+    cnErr.textContent = ''; goBtn.disabled = false; skipCb.checked = false; syncSkip();
     dlg.showModal(); promptIn.focus();
   }
   formEl.addEventListener('submit', async e => {
@@ -398,10 +411,10 @@
     if (!prompt) { cnErr.textContent = 'Write a first message.'; promptIn.focus(); return; }
     cnErr.textContent = ''; goBtn.disabled = true; goBtn.textContent = 'Starting…';
     try {
-      const r = await post('/api/chat/start', { cwd, model: modelSel.value, effort: effortSel.value, prompt });
+      const r = await post('/api/chat/start', { cwd, model: modelSel.value, effort: effortSel.value, prompt, skipPermissions: skipCb.checked });
       LS.set('chat.cwd', projSel.value === '__other' ? '' : cwd); LS.set('chat.path', projSel.value === '__other' ? cwd : ''); LS.set('chat.model', modelSel.value); LS.set('chat.effort', effortSel.value);
       promptIn.value = ''; dlg.close(); openSession(r.id);
-    } catch (err) { cnErr.textContent = err.message; goBtn.disabled = false; goBtn.textContent = 'Start session'; }
+    } catch (err) { cnErr.textContent = err.message; goBtn.disabled = false; syncSkip(); }
   });
   const newBtn = h('button', { id: 'chat-new', class: 'chat-new', type: 'button', 'aria-haspopup': 'dialog', onclick: openDialog }, h('span', { 'aria-hidden': 'true' }), 'New session');
   newBtn.firstChild.innerHTML = '<svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>';

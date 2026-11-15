@@ -38,6 +38,7 @@ dialog.cn::backdrop{background:oklch(10% 0.005 260 / .72);backdrop-filter:blur(3
 .cn-path input{flex:1;min-width:0}
 .cn-browse{flex:none}
 .cn-fb{display:grid;gap:6px;padding:8px;border-radius:3px;background:var(--color-raise);box-shadow:inset 0 0 0 1px var(--color-edge)}
+.cn-fb[hidden]{display:none}
 .cn-fb-bar{display:flex;gap:6px;align-items:center}
 .cn-fb-cur{flex:1;min-width:0;font:400 11px var(--font-mono);color:var(--color-ink-2,var(--color-ink));overflow-wrap:anywhere}
 .cn-fb-list{list-style:none;margin:0;padding:0;max-height:180px;overflow:auto;display:grid}
@@ -47,6 +48,15 @@ dialog.cn::backdrop{background:oklch(10% 0.005 260 / .72);backdrop-filter:blur(3
 .cn-fb-msg{font:400 11px var(--font-mono);color:var(--color-ink-3)}
 .cn-fb-msg:empty{display:none}
 .cn-hint{font:400 11px/1.5 var(--font-mono);color:var(--color-ink-3);text-transform:none!important}
+.cn-skip{display:grid;gap:6px;padding:7px 8px;border-radius:3px;box-shadow:inset 0 0 0 1px var(--color-edge)}
+.cn-skip.on{box-shadow:inset 0 0 0 1px var(--color-bad-ink);background:oklch(from var(--color-bad-ink) l c h / .08)}
+.cn-f .cn-skip-l{display:flex;gap:8px;align-items:center;font:500 12px var(--font-mono);color:var(--color-ink);text-transform:none;cursor:pointer}
+.cn-skip-l input{width:15px;height:15px;margin:0;accent-color:var(--color-bad-ink);flex:none}
+.cn-skip-l input:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.cn-skip-warn{margin:0;font:500 11px/1.5 var(--font-mono);color:var(--color-bad-ink)}
+.cn-skip-warn[hidden]{display:none}
+.chat-skip{flex:none;font:600 10px var(--font-mono);color:var(--color-bad-ink);padding:2px 6px;border-radius:2px;box-shadow:inset 0 0 0 1px var(--color-bad-ink)}
+.chat-skip[hidden]{display:none}
 .cn-err{font:500 12px var(--font-mono);color:var(--color-bad-ink);min-height:0}
 .cn-err:empty{display:none}
 .cn-act{display:flex;gap:8px;justify-content:flex-end;margin-top:2px}

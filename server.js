@@ -691,7 +691,7 @@ function cmdList(v) {
   return [...out].sort((a, b) => a.localeCompare(b));
 }
 function metaOf(c) {
-  return { id: c.id, cwd: c.cwd, model: c.model || 'default', effort: c.effort || 'default', alive: c.alive, busy: c.busy, cost: c.cost, startedAt: c.startedAt, commands: c.commands || null,
+  return { id: c.id, cwd: c.cwd, model: c.model || 'default', effort: c.effort || 'default', skipPermissions: !!c.skipPerms, alive: c.alive, busy: c.busy, cost: c.cost, startedAt: c.startedAt, commands: c.commands || null,
     pending: [...c.pending.values()].map(r => ({ request_id: r.request_id, tool_name: r.tool_name, display_name: r.display_name, description: r.description, ts: r.ts,
       summary: toolSummary(r.tool_name, r.input), questions: r.tool_name === 'AskUserQuestion' ? r.input.questions : null,
       preview: r.tool_name === 'AskUserQuestion' ? '' : clip(JSON.stringify(r.input, null, 1), 1500) })) };
@@ -741,6 +741,8 @@ function chatStart(b) {
   const model = b.model ? String(b.model) : '', effort = b.effort ? String(b.effort) : '';
   if (model && !MODEL_RE.test(model)) throw new HttpErr(400, 'bad model');
   if (effort && !EFFORTS.has(effort)) throw new HttpErr(400, 'bad effort');
+  if (b.skipPermissions !== undefined && typeof b.skipPermissions !== 'boolean') throw new HttpErr(400, 'skipPermissions must be true or false');
+  const skipPerms = b.skipPermissions === true; // opt-in per session, never remembered
   const prompt = typeof b.prompt === 'string' ? b.prompt.trim() : '';
   if (!prompt || prompt.length > 50000) throw new HttpErr(400, 'prompt required (max 50000 chars)');
   let live = 0; for (const c of chats.values()) if (c.alive) live++;
@@ -748,8 +750,9 @@ function chatStart(b) {
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--permission-prompt-tool', 'stdio'];
   if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);
+  if (skipPerms) args.push('--dangerously-skip-permissions');
   return new Promise((resolve, reject) => {
-    const c = { id: '', cwd, model, effort, proc: null, alive: true, busy: true, cost: 0, startedAt: Date.now(), log: [], seq: 0, pending: new Map(), listeners: new Set(), buf: '', stopping: false, stopTimer: null, onId: null };
+    const c = { id: '', cwd, model, effort, skipPerms, proc: null, alive: true, busy: true, cost: 0, startedAt: Date.now(), log: [], seq: 0, pending: new Map(), listeners: new Set(), buf: '', stopping: false, stopTimer: null, onId: null };
     let proc; try { proc = spawn(findClaude(), args, { cwd, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); } catch (e) { return reject(new HttpErr(500, 'cannot start claude: ' + e.message)); }
     c.proc = proc;
     let settled = false, errTail = '';
