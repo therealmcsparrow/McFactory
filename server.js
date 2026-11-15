@@ -7,16 +7,22 @@
 //   /api/stream?hours= SSE, pushes a snapshot when it changes (checked every ~1s)
 //   /api/chat/*        chat with sessions THIS server started (see "owned chat sessions")
 //   /hook/permission, /hook/pretool, /api/ext/*   answer terminal/desktop prompts through global http hooks (see "external prompts")
+//   /api/peer/*        chat with terminal/desktop sessions over their local messaging pipe (see "peer chat")
+//   /api/refresh       POST, chat token: rescan sessions and transcripts now and re-push every stream
 //   --install-hook [--with-ask] / --uninstall-hook [--settings <file>]   merge/remove only our entries in ~/.claude/settings.json
 // PRIVACY: for every session the dashboard did not start, only the session title (first prompt, 60 chars)
 // and subagent descriptions leave this process. No message text, tool inputs or tool outputs.
 // Dashboard-owned sessions (started via POST /api/chat/start) additionally stream their own chat log
 // (user/assistant text, tool names + short summary, results, cost) to this page.
+// Message text of terminal and desktop sessions is only sent to the local dashboard page that holds this run's
+// chat token, and only while that session's chat panel is open. It never appears in /api/state, and nothing
+// leaves the machine. The session's peer token (from its key file) is only ever written to its own pipe.
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const http = require('http');
+const net = require('net');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 
@@ -72,6 +78,100 @@ function hookCli() {
   process.exit(0);
 }
 if (argv.includes('--install-hook') || argv.includes('--uninstall-hook')) hookCli();
+
+// ───────────── plan limits via Claude Code's status line
+// Claude Code hands rate_limits (5-hour / 7-day % used, reset time) only to a status line command, so the server
+// can register itself as one. That mode saves ONLY those numbers (never cwd, session id, paths or model) and prints a line.
+const CLAUDE_DIR = path.dirname(ROOT);
+const SETTINGS_FILE = path.resolve(arg('settings', path.join(CLAUDE_DIR, 'settings.json')));
+const LIMITS_FILE = path.join(CLAUDE_DIR, 'crate-works-limits.json');
+const LIMITS_HIST = path.join(CLAUDE_DIR, 'crate-works-limits.jsonl');
+const LIMITS_HIST_MAX = 200e3;
+const SL_OFF = argv.includes('--no-statusline');
+const WIN_RE = /^[a-z0-9_]{1,40}$/;
+const isSea = (() => { try { return require('node:sea').isSea(); } catch { return false; } })();
+const slOurs = sl => !!(sl && typeof sl === 'object' && typeof sl.command === 'string' && /(^|\s)--statusline(\s|$)/.test(sl.command));
+function slCommand() {
+  const q = p => '"' + String(p).replace(/\\/g, '/') + '"';
+  return (isSea ? q(process.execPath) : q(process.execPath) + ' ' + q(__filename)) + ' --statusline' + (argv.includes('--root') ? ' --root ' + q(ROOT) : '');
+}
+function readSettings() { // -> object | null (unreadable or not an object: never written)
+  try { const c = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); return c && typeof c === 'object' && !Array.isArray(c) ? c : null; }
+  catch (e) { return e.code === 'ENOENT' ? {} : null; }
+}
+function writeSettings(cfg) {
+  const tmp = SETTINGS_FILE + '.aico-tmp';
+  fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + '\n'); fs.renameSync(tmp, SETTINGS_FILE);
+}
+function slState() { // 'off' | 'ours' | 'foreign' | 'none' | 'unreadable'
+  if (SL_OFF) return 'off';
+  const cfg = readSettings(); if (!cfg) return 'unreadable';
+  return !cfg.statusLine ? 'none' : slOurs(cfg.statusLine) ? 'ours' : 'foreign';
+}
+function slEnsure() { // on startup: set ours when none is set, refresh ours when its path moved, never touch a foreign one
+  if (SL_OFF) return;
+  const cfg = readSettings();
+  if (!cfg) { console.log('status line: ' + SETTINGS_FILE + ' unreadable, not touched'); return; }
+  const want = slCommand();
+  if (cfg.statusLine && !slOurs(cfg.statusLine)) return;
+  if (cfg.statusLine && cfg.statusLine.command === want) return;
+  cfg.statusLine = { type: 'command', command: want };
+  try { writeSettings(cfg); console.log('status line: installed in ' + SETTINGS_FILE); } catch (e) { console.log('status line: cannot write ' + SETTINGS_FILE + ': ' + e.code); }
+}
+function resetMs(v) {
+  const n = typeof v === 'number' ? (v < 1e12 ? v * 1000 : v) : typeof v === 'string' ? Date.parse(v) : NaN;
+  return Number.isFinite(n) ? Math.round(n) : null;
+}
+function cleanLimits(rl) { // rate_limits -> {windows:{key:{pct,resetsAt}}, spend?} | null
+  if (!rl || typeof rl !== 'object') return null;
+  const windows = {}; let spend = null;
+  for (const k of Object.keys(rl).slice(0, 20)) {
+    const w = rl[k]; if (!WIN_RE.test(k) || !w || typeof w !== 'object') continue;
+    if (k === 'spend_limit') {
+      const used = +w.used_usd, lim = +w.limit_usd;
+      if (Number.isFinite(used) && Number.isFinite(lim)) spend = { used: Math.round(used * 100) / 100, limit: Math.round(lim * 100) / 100, period: typeof w.period === 'string' && WIN_RE.test(w.period) ? w.period : '' };
+      continue;
+    }
+    const pct = +w.used_percentage; if (!Number.isFinite(pct)) continue;
+    windows[k] = { pct: Math.round(Math.max(0, Math.min(100, pct)) * 10) / 10, resetsAt: resetMs(w.resets_at) };
+  }
+  if (!Object.keys(windows).length && !spend) return null;
+  return spend ? { windows, spend } : { windows };
+}
+function statuslineCli() {
+  let input = {};
+  try { input = JSON.parse(fs.readFileSync(0, 'utf8')); } catch { }
+  const lim = cleanLimits(input && input.rate_limits);
+  if (lim) {
+    try {
+      const now = Date.now();
+      const tmp = LIMITS_FILE + '.aico-tmp';
+      fs.writeFileSync(tmp, JSON.stringify(Object.assign({ at: now }, lim))); fs.renameSync(tmp, LIMITS_FILE);
+      const w = {}; for (const k of Object.keys(lim.windows)) w[k] = lim.windows[k].pct;
+      let last = null;
+      try { const txt = fs.readFileSync(LIMITS_HIST, 'utf8'); const ls = txt.trimEnd().split('\n'); last = JSON.parse(ls[ls.length - 1]).w; if (txt.length > LIMITS_HIST_MAX) fs.writeFileSync(LIMITS_HIST, ls.slice(ls.length >> 1).join('\n') + '\n'); } catch { }
+      if (JSON.stringify(last) !== JSON.stringify(w)) fs.appendFileSync(LIMITS_HIST, JSON.stringify({ t: now, w }) + '\n');
+    } catch { }
+  }
+  const m = input && input.model && typeof input.model === 'object' ? input.model : {};
+  const parts = [];
+  const name = String(m.display_name || m.id || '').replace(/[\x00-\x1f\x7f]/g, '').slice(0, 40); if (name) parts.push(name);
+  const fmt = p => (Math.round(p * 10) / 10) + '%';
+  if (lim && lim.windows.five_hour) parts.push('5h ' + fmt(lim.windows.five_hour.pct));
+  if (lim && lim.windows.seven_day) parts.push('week ' + fmt(lim.windows.seven_day.pct));
+  try { fs.writeSync(1, (parts.join(' · ') || 'Claude') + '\n'); } catch { }
+  process.exit(0);
+}
+function slUninstallCli() {
+  const cfg = readSettings();
+  if (!cfg) { console.error(SETTINGS_FILE + ' unreadable (not touched)'); process.exit(1); }
+  if (slOurs(cfg.statusLine)) { delete cfg.statusLine; writeSettings(cfg); console.log('status line removed from ' + SETTINGS_FILE); }
+  else console.log('no status line of ours in ' + SETTINGS_FILE + ' (not touched)');
+  process.exit(0);
+}
+if (argv.includes('--statusline')) statuslineCli();
+else if (argv.includes('--uninstall-statusline')) slUninstallCli();
 
 // ───────────── pricing (USD per million tokens). Source: claude-api skill model table, cached 2026-11-03.
 // cacheWrite = 1.25 × input (5-minute cache write). Unknown model → cost 0 and costKnown=false.
@@ -317,7 +417,7 @@ function readLive() {
   for (const n of names) {
     let o; try { o = JSON.parse(fs.readFileSync(path.join(SESS_DIR, n), 'utf8')); } catch { continue; }
     if (!o || !o.sessionId || (o.pid && !alive(o.pid))) continue;
-    ps.add(String(o.sessionId));
+    ps.add(String(o.sessionId)); peerSeen(String(o.sessionId), o.pid, String(o.status || ''));
     if (!o.status) continue;
     const at = +o.statusUpdatedAt || +o.updatedAt || 0, prev = m.get(o.sessionId);
     if (!prev || at > prev.since) m.set(o.sessionId, { status: String(o.status), waitingFor: o.waitingFor ? String(o.waitingFor) : '', since: at });
@@ -451,7 +551,8 @@ function buildSnapshot(hours) {
     t.status = st.includes('running') ? 'running' : st.includes('waiting') ? 'waiting' : st.includes('failed') && t.agents[0].status === 'failed' ? 'failed' : 'done';
     t.endedAt = t.status === 'done' || t.status === 'failed' ? Math.max(...t.agents.map(x => x.lastActivity)) : null;
     t.lastActivity = Math.max(...t.agents.map(x => x.lastActivity));
-    { const oc = chats.get(t.id); t.owned = !!oc; t.chat = oc ? { alive: oc.alive, busy: oc.busy, pending: oc.pending.size } : null; const ep = ext.get(t.id); t.ext = ep && ep.size ? { pending: ep.size } : null; } // flags only, never text
+    { const oc = chats.get(t.id); t.owned = !!oc; t.chat = oc ? { alive: oc.alive, busy: oc.busy, pending: oc.pending.size } : null; const ep = ext.get(t.id); t.ext = ep && ep.size ? { pending: ep.size } : null;
+      const ps = peerState.get(t.id); t.peer = !oc && procs.has(t.id) ? { live: true, canSend: ps ? ps.canSend : true } : null; } // flags only, never text
     // open = a live Claude Code process holds the session (~/.claude/sessions/<pid>.json, pid alive), else recent transcript activity
     t.openBy = procs.has(t.id) ? 'process' : now - t.lastActivity < OPEN_MS ? 'recent' : null;
     t.closed = !t.openBy; if (t.closed) t.endedAt = t.lastActivity;
@@ -486,6 +587,47 @@ function snapshot(hours) {
   snapCache.set(hours, r); return r;
 }
 
+// ───────────── usage view: hourly token/cost buckets per model, plus the plan limits our status line saved
+const USAGE_MAX_DAYS = 31, USAGE_HIST_MAX = 5000;
+function readLimits() {
+  try {
+    const o = JSON.parse(fs.readFileSync(LIMITS_FILE, 'utf8'));
+    return o && typeof o === 'object' && o.windows && typeof o.windows === 'object' ? o : null;
+  } catch { return null; }
+}
+function readLimitsHist(since) {
+  try {
+    const out = [];
+    for (const l of fs.readFileSync(LIMITS_HIST, 'utf8').split('\n')) {
+      if (!l) continue;
+      try { const o = JSON.parse(l); if (o && +o.t >= since && o.w && typeof o.w === 'object') out.push({ t: +o.t, w: o.w }); } catch { }
+    }
+    return out.slice(-USAGE_HIST_MAX);
+  } catch { return []; }
+}
+function usage(days) {
+  days = Math.max(1, Math.min(USAGE_MAX_DAYS, Math.round(+days) || 14));
+  const now = Date.now(), since = now - days * 24 * HOUR;
+  if (since < loadedSince) { loadedSince = since; rescanAt = 0; pump(); }
+  const buckets = new Map(); // hour start -> {label: [tokens, output, cost]}
+  const models = {};         // label -> {family, version} so the page colors a model the way the board does
+  for (const a of agents.values()) for (const m of a.msgs.values()) {
+    if (!(m.ts >= since)) continue;
+    const t = Math.floor(m.ts / HOUR) * HOUR;
+    let b = buckets.get(t); if (!b) buckets.set(t, b = {});
+    const info = modelInfo(m.model), p = info.price;
+    if (!models[info.label]) models[info.label] = { family: info.family, version: info.version };
+    const x = b[info.label] || (b[info.label] = [0, 0, 0]);
+    x[0] += m.in + m.out + m.cw + m.cr; x[1] += m.out;
+    if (p) x[2] += (m.in * p.inP + m.out * p.outP + m.cw * p.cwP + m.cr * p.crP) / 1e6;
+  }
+  const hours = [...buckets.entries()].sort((a, b) => a[0] - b[0]).map(([t, m]) => {
+    for (const k of Object.keys(m)) m[k][2] = Math.round(m[k][2] * 1e6) / 1e6;
+    return { t, m };
+  });
+  return { now, days, since, bucketMs: HOUR, loading: pendingBytes > 0, hours, models, limits: readLimits(), history: readLimitsHist(since), statusline: slState() };
+}
+
 // ───────────── owned chat sessions
 // Sessions this server spawns itself (claude -p, stream-json both ways, --permission-prompt-tool stdio).
 // Only these get their message text sent to the browser. Terminal/desktop sessions stay title-only.
@@ -505,6 +647,28 @@ function findClaude() {
   for (const d of (process.env.PATH || '').split(path.delimiter)) { if (!d) continue; const p = path.join(d, exe); if (isFile(p)) return p; }
   return path.join(os.homedir(), '.local', 'bin', exe);
 }
+const DIRS_MAX = 2000;
+function listDirs(p) { // folder browser for the New session dialog: subfolder names only, never file names or contents
+  if (!p) {
+    const roots = [os.homedir()];
+    if (process.platform === 'win32') { for (let c = 67; c <= 90; c++) { const d = String.fromCharCode(c) + ':\\'; try { if (fs.statSync(d).isDirectory()) roots.push(d); } catch { } } }
+    else roots.push('/');
+    return { path: '', parent: '', dirs: [], roots };
+  }
+  if (p.length > 600 || p.includes('\0') || !path.isAbsolute(p)) throw new HttpErr(400, 'path must be absolute');
+  const abs = path.resolve(p);
+  let ents; try { if (!fs.statSync(abs).isDirectory()) throw 0; ents = fs.readdirSync(abs, { withFileTypes: true }); } catch { throw new HttpErr(404, 'folder not found'); }
+  const out = [];
+  for (const d of ents) {
+    if (out.length >= DIRS_MAX) break;
+    let ok = d.isDirectory();
+    if (!ok && d.isSymbolicLink()) try { ok = fs.statSync(path.join(abs, d.name)).isDirectory(); } catch { }
+    if (ok) out.push(d.name);
+  }
+  out.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  const parent = path.dirname(abs);
+  return { path: abs, parent: parent === abs ? '' : parent, dirs: out, roots: [] };
+}
 function validCwd(cwd) {
   if (typeof cwd !== 'string' || !cwd || cwd.length > 600 || cwd.includes('\0')) throw new HttpErr(400, 'cwd must be an absolute path');
   if (!path.isAbsolute(cwd) || /^[\\/]{2}/.test(cwd)) throw new HttpErr(400, 'cwd must be a local absolute path');
@@ -519,8 +683,15 @@ function toolSummary(name, inp) {
   const v = inp.command || inp.file_path || inp.path || inp.pattern || inp.url || inp.query || inp.description || inp.prompt || '';
   return clip(String(v).replace(/\s+/g, ' '), 100);
 }
+// slash command names from the session's init line: names only, checked, capped, sorted
+function cmdList(v) {
+  if (!Array.isArray(v)) return [];
+  const out = new Set();
+  for (const x of v) { if (out.size >= 500) break; const n = String(typeof x === 'string' ? x : x && x.name || '').replace(/^\//, ''); if (/^[\w:.-]{1,80}$/.test(n)) out.add(n); }
+  return [...out].sort((a, b) => a.localeCompare(b));
+}
 function metaOf(c) {
-  return { id: c.id, cwd: c.cwd, model: c.model || 'default', effort: c.effort || 'default', alive: c.alive, busy: c.busy, cost: c.cost, startedAt: c.startedAt,
+  return { id: c.id, cwd: c.cwd, model: c.model || 'default', effort: c.effort || 'default', skipPermissions: !!c.skipPerms, alive: c.alive, busy: c.busy, cost: c.cost, startedAt: c.startedAt, commands: c.commands || null,
     pending: [...c.pending.values()].map(r => ({ request_id: r.request_id, tool_name: r.tool_name, display_name: r.display_name, description: r.description, ts: r.ts,
       summary: toolSummary(r.tool_name, r.input), questions: r.tool_name === 'AskUserQuestion' ? r.input.questions : null,
       preview: r.tool_name === 'AskUserQuestion' ? '' : clip(JSON.stringify(r.input, null, 1), 1500) })) };
@@ -541,7 +712,7 @@ function onLine(c, line) {
   let o; try { o = JSON.parse(line); } catch { return; }
   if (!o || typeof o !== 'object') return;
   if (o.session_id && !c.id) { c.id = String(o.session_id); chats.set(c.id, c); if (c.onId) { c.onId(c); c.onId = null; } }
-  if (o.type === 'system' && o.subtype === 'init') { if (o.model) c.model = String(o.model); touch(c); return; }
+  if (o.type === 'system' && o.subtype === 'init') { if (o.model) c.model = String(o.model); c.commands = cmdList(o.slash_commands); touch(c); return; }
   if (o.type === 'assistant' && o.message && Array.isArray(o.message.content)) {
     for (const b of o.message.content) {
       if (!b) continue;
@@ -570,6 +741,8 @@ function chatStart(b) {
   const model = b.model ? String(b.model) : '', effort = b.effort ? String(b.effort) : '';
   if (model && !MODEL_RE.test(model)) throw new HttpErr(400, 'bad model');
   if (effort && !EFFORTS.has(effort)) throw new HttpErr(400, 'bad effort');
+  if (b.skipPermissions !== undefined && typeof b.skipPermissions !== 'boolean') throw new HttpErr(400, 'skipPermissions must be true or false');
+  const skipPerms = b.skipPermissions === true; // opt-in per session, never remembered
   const prompt = typeof b.prompt === 'string' ? b.prompt.trim() : '';
   if (!prompt || prompt.length > 50000) throw new HttpErr(400, 'prompt required (max 50000 chars)');
   let live = 0; for (const c of chats.values()) if (c.alive) live++;
@@ -577,8 +750,9 @@ function chatStart(b) {
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--permission-prompt-tool', 'stdio'];
   if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);
+  if (skipPerms) args.push('--dangerously-skip-permissions');
   return new Promise((resolve, reject) => {
-    const c = { id: '', cwd, model, effort, proc: null, alive: true, busy: true, cost: 0, startedAt: Date.now(), log: [], seq: 0, pending: new Map(), listeners: new Set(), buf: '', stopping: false, stopTimer: null, onId: null };
+    const c = { id: '', cwd, model, effort, skipPerms, proc: null, alive: true, busy: true, cost: 0, startedAt: Date.now(), log: [], seq: 0, pending: new Map(), listeners: new Set(), buf: '', stopping: false, stopTimer: null, onId: null };
     let proc; try { proc = spawn(findClaude(), args, { cwd, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); } catch (e) { return reject(new HttpErr(500, 'cannot start claude: ' + e.message)); }
     c.proc = proc;
     let settled = false, errTail = '';
@@ -811,16 +985,225 @@ async function extRoute(req, res, u) {
   }
 }
 
+// ───────────── peer chat (terminal/desktop sessions, over their local messaging pipe)
+// Every live Claude Code session listens on a pipe named in ~/.claude/sessions/<pid>.json (messagingSocketPath).
+// We write NDJSON: {"type":"auth","token":<peerToken from <pid>.<64hex>.key>} then one {"type":"user",...} line.
+// The session shows it as a message from another Claude session (a teammate, never the user's approval).
+// The peer token is read per send and only ever written to that pipe: never logged, cached or sent to the page.
+const PEER_PIPE_RE = /^\\\\\.\\pipe\\LOCAL\\cc-msg-[0-9a-f]{32}$/;
+const PEER_TOKEN_RE = /^[0-9a-f]{32}$/;
+const PEER_MAX_TEXT = 50000, PEER_SEND_MS = 5000, PEER_RATE_MS = 1000, PEER_SENT = 50;
+const peerState = new Map(); // sessionId -> {canSend, lastSend, sentTexts, seen}
+function peerOf(sid) { let s = peerState.get(sid); if (!s) peerState.set(sid, s = { canSend: true, lastSend: 0, sentTexts: [], seen: '' }); return s; }
+function peerPipeOk(p) {
+  if (typeof p !== 'string' || !p) return false;
+  if (process.platform === 'win32') return PEER_PIPE_RE.test(p);
+  const r = path.resolve(p); return path.dirname(r) === SESS_DIR && /^cc-msg-[\w.-]{1,80}$/.test(path.basename(r));
+}
+function peerTarget(sid) { // -> {pid, pipe, cwd, entrypoint, status} | null: a live session with a valid pipe, read fresh
+  let names; try { names = fs.readdirSync(SESS_DIR).filter(n => /^\d+\.json$/.test(n)); } catch { return null; }
+  let best = null;
+  for (const n of names) {
+    let o; try { o = JSON.parse(fs.readFileSync(path.join(SESS_DIR, n), 'utf8')); } catch { continue; }
+    if (!o || String(o.sessionId) !== sid || !Number.isInteger(o.pid) || o.pid <= 0 || !alive(o.pid) || !peerPipeOk(o.messagingSocketPath)) continue;
+    const at = +o.startedAt || 0;
+    if (!best || at > best.at) best = { pid: o.pid, pipe: o.messagingSocketPath, cwd: String(o.cwd || ''), entrypoint: String(o.entrypoint || ''), status: String(o.status || ''), at };
+  }
+  if (best) delete best.at;
+  return best;
+}
+function peerKey(pid) { // -> peerToken | null. Newest <pid>.<64hex>.key; never cached
+  const re = new RegExp('^' + pid + '\\.[0-9a-f]{64}\\.key$');
+  let names; try { names = fs.readdirSync(SESS_DIR).filter(n => re.test(n)); } catch { return null; }
+  let best = null, at = -1;
+  for (const n of names) { try { const m = fs.statSync(path.join(SESS_DIR, n)).mtimeMs; if (m > at) { at = m; best = n; } } catch { } }
+  if (!best) return null;
+  try { const k = JSON.parse(fs.readFileSync(path.join(SESS_DIR, best), 'utf8')); return k && typeof k.peerToken === 'string' && PEER_TOKEN_RE.test(k.peerToken) ? k.peerToken : null; } catch { return null; }
+}
+function peerSend(target, text, priority) { // resolves when the session closed the pipe cleanly; rejects HttpErr(502)
+  return new Promise((resolve, reject) => {
+    const tk = peerKey(target.pid);
+    if (!tk) return reject(new HttpErr(502, 'session key unavailable'));
+    const payload = JSON.stringify({ type: 'auth', token: tk }) + '\n' + JSON.stringify({ type: 'user', message: { role: 'user', content: text }, priority }) + '\n';
+    let done = false, timer = null;
+    const sock = net.connect(target.pipe, () => { sock.end(payload); });
+    const finish = why => { if (done) return; done = true; clearTimeout(timer); if (why) { sock.destroy(); reject(new HttpErr(502, why)); } else resolve(); };
+    timer = setTimeout(() => finish('session did not take the message in time'), PEER_SEND_MS);
+    sock.on('data', () => { }); // nothing is expected back
+    sock.on('error', e => finish('session pipe refused the message (' + (e.code || 'error') + ')'));
+    sock.on('close', hadErr => finish(hadErr ? 'session pipe closed with an error' : null));
+  });
+}
+function peerSeen(sid, pid, status) { // from readLive: a session that changed state may accept messages again
+  const s = peerState.get(sid); if (!s) return;
+  const k = pid + ':' + status; if (s.seen !== k) { s.seen = k; if (!s.canSend) { s.canSend = true; version++; } }
+}
+// conversation stream: one tail per session while at least one chat panel listens; read from the transcript.
+// Only user text, peer messages, assistant text and tool name + short summary. No tool input beyond that, no tool output.
+const PEER_LOG = 200, PEER_LINE_MAX = 1 << 20, PEER_INIT_BYTES = 16 << 20, PEER_CHUNK = 8 << 20;
+const PEER_HEAD = 'Another Claude session sent a message:\n', PEER_TAIL = '\n\nThis came from another Claude session', PEER_HELD = 'Held peer message';
+const peerTails = new Map(); // sessionId -> {sid, fp, offset, carry, skip, log, seq, listeners, meta, live}
+function peerText(content) { // user text blocks only (tool_result blocks are skipped)
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.filter(b => b && b.type === 'text' && typeof b.text === 'string').map(b => b.text).join('\n');
+}
+function peerEntries(line, sent) { // one transcript line -> entries (no i/ts yet)
+  if (typeof line !== 'string' || line.length > PEER_LINE_MAX) return [];
+  let o; try { o = JSON.parse(line); } catch { return []; }
+  if (!o || typeof o !== 'object' || o.isSidechain) return [];
+  if (o.type === 'system' && typeof o.content === 'string' && o.content.startsWith(PEER_HELD)) {
+    // Claude Code held a peer message (e.g. the session bypasses prompts): show it, the user must review it in the session
+    const m = /«([\s\S]*?)»/.exec(o.content);
+    return [{ kind: 'held', text: clip(m ? m[1] : '', MAX_TEXT), at: Date.parse(o.timestamp) || Date.now() }];
+  }
+  if (!o.message) return [];
+  const at = Date.parse(o.timestamp) || Date.now(), out = [];
+  if (o.type === 'user') {
+    let text = peerText(o.message.content);
+    if (o.isMeta) {
+      if (!o.origin || o.origin.kind !== 'peer' || !text) return [];
+      if (text.startsWith(PEER_HEAD)) { text = text.slice(PEER_HEAD.length); const k = text.lastIndexOf(PEER_TAIL); if (k >= 0) text = text.slice(0, k); }
+      const mine = Array.isArray(sent) && sent.some(s => s === text || s.trim() === text.trim());
+      out.push({ kind: 'peer', via: mine ? 'dashboard' : 'session', text: clip(text, MAX_TEXT), at });
+    } else if (text.trim() && !text.trimStart().startsWith('<') && !o.isCompactSummary) out.push({ kind: 'user', text: clip(text, MAX_TEXT), at });
+  } else if (o.type === 'assistant' && Array.isArray(o.message.content)) {
+    for (const b of o.message.content) {
+      if (!b) continue;
+      if (b.type === 'text' && typeof b.text === 'string' && b.text.trim()) out.push({ kind: 'assistant', text: clip(b.text, MAX_TEXT), at });
+      else if (b.type === 'tool_use') out.push({ kind: 'tool', name: clip(b.name, 60), text: toolSummary(b.name, b.input), at });
+    }
+  }
+  return out;
+}
+function peerFile(sid) { // the session's main transcript: tracked file first, else ROOT/*/<sid>.jsonl
+  for (const f of files.values()) if (f.kind === 'main' && f.agent.sessionId === sid) return f.path;
+  let ds; try { ds = fs.readdirSync(ROOT, { withFileTypes: true }); } catch { return null; }
+  for (const d of ds) { if (!d.isDirectory()) continue; const fp = path.join(ROOT, d.name, sid + '.jsonl'); try { if (fs.statSync(fp).isFile()) return fp; } catch { } }
+  return null;
+}
+function tailRead(t) { // new complete lines since t.offset -> entries; lines over PEER_LINE_MAX are skipped unparsed
+  let st; try { st = fs.statSync(t.fp); } catch { return []; }
+  if (st.size < t.offset) { t.offset = 0; t.carry = null; t.skip = false; } // replaced or truncated
+  if (st.size === t.offset) return [];
+  const len = Math.min(st.size - t.offset, PEER_CHUNK), buf = Buffer.alloc(len);
+  let fd = null; try { fd = fs.openSync(t.fp, 'r'); fs.readSync(fd, buf, 0, len, t.offset); } catch { return []; } finally { if (fd !== null) try { fs.closeSync(fd); } catch { } }
+  t.offset += len;
+  const out = [], sent = (peerState.get(t.sid) || {}).sentTexts;
+  let start = 0, nl;
+  while ((nl = buf.indexOf(10, start)) !== -1) {
+    const part = buf.subarray(start, nl); start = nl + 1;
+    if (t.skip) { t.skip = false; t.carry = null; continue; }
+    const line = t.carry ? Buffer.concat([t.carry, part]) : part; t.carry = null;
+    if (line.length <= PEER_LINE_MAX) for (const e of peerEntries(line.toString('utf8'), sent)) out.push(e);
+  }
+  if (start < buf.length && !t.skip) {
+    const rest = t.carry ? Buffer.concat([t.carry, buf.subarray(start)]) : Buffer.from(buf.subarray(start));
+    if (rest.length > PEER_LINE_MAX) { t.skip = true; t.carry = null; } else t.carry = rest;
+  }
+  return out;
+}
+function tailAdd(t, e) { e.i = ++t.seq; e.ts = e.at; delete e.at; t.log.push(e); if (t.log.length > PEER_LOG) t.log.shift(); return e; }
+function tailMeta(t) {
+  const target = peerTarget(t.sid), ps = peerState.get(t.sid), lv = live && live.get(t.sid);
+  return { live: !!target || procs.has(t.sid), canSend: !!target && (ps ? ps.canSend : true), status: lv ? lv.status : target ? target.status : '', entrypoint: target ? target.entrypoint : '' };
+}
+function tailOpen(sid) {
+  const t = { sid, fp: peerFile(sid), offset: 0, carry: null, skip: false, log: [], seq: 0, listeners: new Set(), meta: null, live: false };
+  if (t.fp) {
+    try { const size = fs.statSync(t.fp).size; if (size > PEER_INIT_BYTES) { t.offset = size - PEER_INIT_BYTES; t.skip = true; } } catch { }
+    for (let n = 0; n < 8; n++) { const es = tailRead(t); for (const e of es) tailAdd(t, e); if (!es.length && !t.carry) break; }
+  }
+  t.meta = tailMeta(t); t.live = t.meta.live;
+  peerTails.set(sid, t); return t;
+}
+function peerMetaNow(sid) { // push a changed meta to open panels now, so a later state change cannot hide it before the next tick
+  const t = peerTails.get(sid); if (!t) return;
+  const m = tailMeta(t);
+  if (JSON.stringify(m) !== JSON.stringify(t.meta)) { t.meta = m; for (const r of t.listeners) sse(r, 'meta', m); }
+}
+function peerTick() { // every second: new transcript lines and state changes to the open panels
+  for (const t of peerTails.values()) {
+    if (!t.fp) t.fp = peerFile(t.sid);
+    if (t.fp) for (const e of tailRead(t)) { tailAdd(t, e); for (const r of t.listeners) sse(r, 'entry', e); }
+    const m = tailMeta(t);
+    if (JSON.stringify(m) !== JSON.stringify(t.meta)) {
+      t.meta = m; for (const r of t.listeners) sse(r, 'meta', m);
+      if (t.live && !m.live) { const e = tailAdd(t, { kind: 'system', text: 'Session closed', at: Date.now() }); for (const r of t.listeners) sse(r, 'entry', e); }
+      t.live = m.live;
+    }
+  }
+}
+async function peerRoute(req, res, u) {
+  try {
+    const m = /^\/api\/peer\/([\w-]{1,64})\/(send|stream)$/.exec(u.pathname);
+    if (!m) return sendJson(res, 404, { error: 'not found' });
+    const sid = m[1];
+    if (m[2] === 'stream') {
+      if (req.method !== 'GET') return sendJson(res, 405, { error: 'GET only' });
+      if (!tokenOk(u.searchParams.get('token'))) return sendJson(res, 403, { error: 'bad token' });
+      if (chats.has(sid)) return sendJson(res, 404, { error: 'owned session: use /api/chat' });
+      let t = peerTails.get(sid);
+      if (!t && !peerTarget(sid) && !peerFile(sid)) return sendJson(res, 404, { error: 'no terminal or desktop session with this id' });
+      if (!t) t = tailOpen(sid);
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' });
+      res.write('retry: 2000\n\n'); sse(res, 'init', { meta: t.meta, log: t.log });
+      t.listeners.add(res);
+      req.on('close', () => { t.listeners.delete(res); if (!t.listeners.size && peerTails.get(sid) === t) peerTails.delete(sid); });
+      return;
+    }
+    if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
+    if (!tokenOk(req.headers['x-chat-token'])) return sendJson(res, 403, { error: 'bad token' });
+    const body = await readJson(req) || {};
+    const text = body.text, priority = body.priority === undefined ? 'next' : body.priority;
+    if (typeof text !== 'string' || !text.length || text.length > PEER_MAX_TEXT) throw new HttpErr(400, 'text must be 1-' + PEER_MAX_TEXT + ' characters');
+    if (priority !== 'next' && priority !== 'now') throw new HttpErr(400, 'priority must be "next" or "now"');
+    if (chats.has(sid)) throw new HttpErr(404, 'owned session: use /api/chat');
+    const target = peerTarget(sid); if (!target) throw new HttpErr(404, 'no live terminal or desktop session with this id');
+    const st = peerOf(sid), now = Date.now();
+    if (now - st.lastSend < PEER_RATE_MS) throw new HttpErr(429, 'one message per second');
+    st.lastSend = now; st.seen = target.pid + ':' + target.status;
+    try { await peerSend(target, text, priority); } catch (e) { if (st.canSend) { st.canSend = false; version++; } peerMetaNow(sid); throw e; }
+    if (!st.canSend) { st.canSend = true; version++; }
+    st.sentTexts.push(text); if (st.sentTexts.length > PEER_SENT) st.sentTexts.shift();
+    return sendJson(res, 200, { ok: true });
+  } catch (e) {
+    if (e instanceof HttpErr) return sendJson(res, e.code, { error: e.message });
+    console.error('peer error:', e && e.message); return sendJson(res, 500, { error: 'internal error' });
+  }
+}
+
 // ───────────── http
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.md': 'text/plain; charset=utf-8' };
-const STATIC = new Set(['index.html', 'live-data.js', 'chat.js', 'chat.css']);
+const MIME ={ '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.md': 'text/plain; charset=utf-8' };
+const STATIC = new Set(['index.html', 'live-data.js', 'chat.js', 'chat.css', 'usage.js']);
 const clients = new Set();
 const server = http.createServer((req, res) => {
   if (!hostOk(req) || !originOk(req)) { res.writeHead(403, { 'content-type': 'text/plain' }); res.end('forbidden'); return; }
   const u = new URL(req.url, 'http://localhost');
   if (u.pathname.startsWith('/api/chat/')) { chatRoute(req, res, u); return; }
   if (u.pathname.startsWith('/api/ext/')) { extRoute(req, res, u); return; }
+  if (u.pathname.startsWith('/api/peer/')) { peerRoute(req, res, u); return; }
   if (u.pathname === '/hook/permission' || u.pathname === '/hook/pretool') { hookRoute(req, res, u); return; }
+  if (u.pathname === '/api/fs/dirs') {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'GET only' });
+    if (!tokenOk(req.headers['x-chat-token'])) return sendJson(res, 403, { error: 'bad token' });
+    try { return sendJson(res, 200, listDirs(u.searchParams.get('path') || '')); }
+    catch (e) { return sendJson(res, e instanceof HttpErr ? e.code : 500, { error: e instanceof HttpErr ? e.message : 'cannot read that folder' }); }
+  }
+  if (u.pathname === '/api/refresh') {
+    // hard refresh of the data (not the page): rescan the folders and session files now, re-push every stream
+    if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
+    if (!tokenOk(req.headers['x-chat-token'])) return sendJson(res, 403, { error: 'bad token' });
+    rescanAt = 0; liveKey = '';
+    const t0 = Date.now(); do pump(); while (dirtyFiles.size && Date.now() - t0 < 1500);
+    version++;
+    for (const c of clients) { c.last = ''; try { push(c); } catch { clients.delete(c); } }
+    return sendJson(res, 200, { ok: true });
+  }
+  if (u.pathname === '/api/usage') {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'GET only' });
+    return sendJson(res, 200, usage(u.searchParams.get('days')));
+  }
   const hours = u.searchParams.get('hours') || DEFAULT_HOURS;
   if (u.pathname === '/api/state') {
     const s = snapshot(hours);
@@ -857,11 +1240,13 @@ const t0 = Date.now(); while (dirtyFiles.size && Date.now() - t0 < 1500) pump();
 let beat = 0;
 setInterval(() => {
   pump();
+  peerTick();
   for (const c of clients) { try { push(c); } catch { clients.delete(c); } }
-  if (++beat % 15 === 0) { for (const c of clients) c.res.write(': ping\n\n'); for (const ch of chats.values()) for (const r of ch.listeners) try { r.write(': ping\n\n'); } catch { } }
+  if (++beat % 15 === 0) { for (const c of clients) c.res.write(': ping\n\n'); for (const ch of [...chats.values(), ...peerTails.values()]) for (const r of ch.listeners) try { r.write(': ping\n\n'); } catch { } }
 }, 1000);
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`Claude Code factory → http://127.0.0.1:${PORT}/  (window ${DEFAULT_HOURS}h, ${files.size} transcripts tracked, ${(pendingBytes / 1e6).toFixed(1)} MB still to read)`);
   console.log(`source: ${ROOT}`);
+  slEnsure();
 });

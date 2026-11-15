@@ -1,6 +1,6 @@
 /* live-data.js — DashSim-shaped adapter fed by the local server's SSE stream.
  * window.DashSim = { state, MODELS, ROLES, EFFORTS, history, subscribe, totals, byModel, byProject,
- *                    byRole, agents, fmt, roleColor, modelColor, effortColor, setHours, hours, conn }
+ *                    byRole, agents, fmt, roleColor, modelColor, effortColor, setHours, reconnect, hours, conn }
  * subscribe(fn): fn(state, newEvents) now (if data is in) and on every pushed snapshot.
  * MODELS is dynamic: any model id the server reports gets an entry {id,label,color,speed,family,priced}.
  */
@@ -80,9 +80,9 @@
     conn.status = 'live'; conn.lastAt = Date.now();
     for (const fn of subs) { try { fn(state, fresh); } catch (e) { console.error(e); } }
   }
-  function connect() {
+  function connect(keepSeen) {
     if (es) es.close();
-    conn.status = 'connecting'; seenEv.clear();
+    conn.status = 'connecting'; if (!keepSeen) seenEv.clear();
     es = new EventSource('/api/stream?hours=' + encodeURIComponent(hours));
     es.onmessage = e => { try { ingest(JSON.parse(e.data)); } catch (err) { console.error('bad snapshot', err); } };
     es.onerror = () => { conn.status = es.readyState === 2 ? 'offline' : 'reconnecting'; for (const fn of connSubs) fn(conn); };
@@ -136,6 +136,8 @@
     totals, byModel, byProject, byRole, agents, roleColor, modelColor, effortColor, effortInfo, ensureModel,
     get hours() { return hours; },
     setHours(h) { h = +h; if (!h || h === hours) return; hours = h; safeSet('factory.hours', String(h)); state.ready = false; connect(); },
+    // reopen the stream without a page reload (the refresh button); events already shown stay seen
+    reconnect() { connect(true); },
     tick() { },
   };
   connect();

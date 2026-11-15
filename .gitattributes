@@ -1,0 +1,5 @@
+# Keep LF in the working copy on every OS
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary

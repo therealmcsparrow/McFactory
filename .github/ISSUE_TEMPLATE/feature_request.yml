@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest a change you can describe clearly. For a rough idea, start a discussion instead.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What do you want to do that you cannot do now?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What should change?
+      description: What you would see or click, and what would happen.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Other ways you considered
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: This does not need data to leave my computer, or I explain below why it should.

@@ -25,6 +25,12 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--focus);outline-offs
 *{scrollbar-width:thin;scrollbar-color:oklch(36% 0.008 260) transparent}
 #tip{position:fixed;left:0;top:0;pointer-events:none;opacity:0;z-index:40;transition:opacity .12s}
 #tip.on{opacity:1}
+#rmenu{position:fixed;z-index:60;min-width:150px;padding:4px;background:var(--color-board);border-radius:4px;box-shadow:0 0 0 1px var(--color-edge),0 10px 24px -10px oklch(0% 0 0 / .8);backdrop-filter:blur(6px)}
+#rmenu[hidden]{display:none}
+#rmenu .rm-t{font:500 11px var(--font-mono);color:var(--color-ink-3);padding:4px 8px 5px}
+#rmenu button{display:block;width:100%;text-align:left;padding:6px 8px;border-radius:3px;color:var(--color-ink);font:500 13px var(--font-ui)}
+#rmenu button:hover:not(:disabled),#rmenu button:focus-visible{background:var(--color-raise)}
+#rmenu button:disabled{color:var(--color-ink-3);cursor:default}
 #tip table{border-collapse:collapse;width:100%}
 #tip td{padding:1px 0}#tip td+td{text-align:right;padding-left:14px;font-variant-numeric:tabular-nums}
 #detail[hidden]{display:none}
@@ -232,6 +238,7 @@ h2 small{font:400 11px var(--font-mono);color:var(--color-ink-3);text-transform:
 .labels>.lnear{opacity:.78}.labels>.lnear:hover,.labels>.lnear.on{opacity:1}
 .labels>.lhide{visibility:hidden!important;pointer-events:none!important}.labels>.lhide *{pointer-events:none!important}
 #lmore{position:fixed;z-index:4;font:400 11px var(--font-mono);color:var(--color-ink-2);background:oklch(16% 0.006 260 / .85);box-shadow:0 0 0 1px var(--color-edge);padding:3px 8px;border-radius:3px;pointer-events:none}
+.sign.fac:not(.ask){display:none}.sign.fac>.sw,.sign.fac>span,.sign.fac>small.cl{display:none} /* the name is on the roof sign; this tag only says "needs you" */
 .sign.fac small.cl{font:500 11px var(--font-mono);color:var(--color-ink-3);text-transform:none;letter-spacing:0}
 .sign.cb{flex-direction:column;align-items:stretch;gap:6px;padding:6px 8px 8px;cursor:default;white-space:normal;box-shadow:0 0 0 1px var(--color-edge),inset 0 3px 0 var(--c,transparent);max-width:370px;opacity:0;pointer-events:none;transition:opacity .25s}
 .sign.cb.show{opacity:1;pointer-events:auto}
@@ -268,6 +275,7 @@ h2 small{font:400 11px var(--font-mono);color:var(--color-ink-3);text-transform:
 <script src="live-data.js"></script>
 <link rel="stylesheet" href="chat.css">
 <script src="chat.js" defer></script>
+<script src="usage.js" defer></script>
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
@@ -752,6 +760,24 @@ function startApp(buildScene, o) {
     if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return; down = null;
     const p = pickAt(); if (p) api.focus(p.kind, p.id);
   });
+  // right-click a transport robot: a small menu with "Drive" (nudges a robot out of a jam)
+  const rmenu = document.createElement('div'); rmenu.id = 'rmenu'; rmenu.setAttribute('role', 'menu'); rmenu.hidden = true; document.body.append(rmenu);
+  const closeMenu = () => { if (!rmenu.hidden) { rmenu.hidden = true; rmenu.textContent = ''; } };
+  let rdown = null; canvas.addEventListener('pointerdown', e => { if (e.button === 2) rdown = [e.clientX, e.clientY]; });
+  canvas.addEventListener('contextmenu', e => {
+    const dragged = rdown && Math.hypot(e.clientX - rdown[0], e.clientY - rdown[1]) > 5; rdown = null;
+    const r = dragged ? null : S?.robotAt?.(e.clientX, e.clientY); if (!r) { closeMenu(); return; } e.preventDefault(); down = null;
+    rmenu.textContent = ''; const t = document.createElement('div'); t.className = 'rm-t'; t.textContent = 'Transport robot ' + r.id; rmenu.append(t);
+    const b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'menuitem'); b.textContent = 'Drive';
+    if (!r.canDrive) { b.disabled = true; b.title = 'Only a robot that is out on the road can drive'; }
+    b.addEventListener('click', () => { S.driveRobot(r.id); closeMenu(); });
+    rmenu.append(b); rmenu.hidden = false;
+    const w = rmenu.offsetWidth, h = rmenu.offsetHeight; rmenu.style.left = Math.min(e.clientX, innerWidth - w - 8) + 'px'; rmenu.style.top = Math.min(e.clientY, innerHeight - h - 8) + 'px';
+    if (!b.disabled) b.focus();
+  });
+  addEventListener('pointerdown', e => { if (!rmenu.contains(e.target)) closeMenu(); }, true);
+  addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
+  addEventListener('wheel', closeMenu, { passive: true }); addEventListener('blur', closeMenu);
   function pickAt() {
     ray.setFromCamera(ptr, camera); ray.ray.origin.addScaledVector(ray.ray.direction, camera.near); // start at the (negative) near plane so foreground stays pickable
     const hits = ray.intersectObjects(pickables, false);
@@ -761,7 +787,8 @@ function startApp(buildScene, o) {
   function doHover() {
     if (!ptrXY) return; const p = pickAt();
     const key = p ? p.kind + p.id : null;
-    if (key !== (hover && hover.kind + hover.id)) { hover = p; S.hover?.(p); canvas.style.cursor = p ? 'pointer' : ''; }
+    if (key !== (hover && hover.kind + hover.id)) { hover = p; S.hover?.(p); }
+    canvas.style.cursor = p ? 'pointer' : S?.robotAt?.(ptrXY[0], ptrXY[1]) ? 'context-menu' : ''; // over a robot: hint that it has a right-click menu
     hud.tip(p, ptrXY[0], ptrXY[1]);
   }
 
@@ -909,9 +936,21 @@ function buildScene(ctx) {
     f.roofM = mat('#2e343c', { metalness: .55, roughness: .5, transparent: true }); f.roofDM = mat('#22262c', { metalness: .5, roughness: .45, transparent: true });
     f.skyM = new THREE.MeshStandardMaterial({ color: '#1a2230', emissive: '#ffd08a', emissiveIntensity: .1, roughness: .2, metalness: .3, transparent: true });
     f.beaconM = new THREE.MeshBasicMaterial({ color: '#222222', toneMapped: false, transparent: true });
-    f.smoke = [0, 1, 2].map(i => { const m = new THREE.Mesh(smokeG, new THREE.MeshBasicMaterial({ color: '#8a9099', transparent: true, opacity: 0, depthWrite: false })); m.userData.ph = i / 3; m.visible = false; return m; });
+    f.smoke = [0, 1, 2].map(i => { const m = new THREE.Mesh(smokeG, new THREE.MeshBasicMaterial({ color: '#f4f2ee', transparent: true, opacity: 0, depthWrite: false })); m.userData.ph = i / 3; m.visible = false; return m; });
+    // roof name sign: the name painted on a canvas texture (a real panel in the scene, so it keeps its place and angle as the camera moves)
+    { const SPX = 120, cv = document.createElement('canvas'), g = cv.getContext('2d'), FONT = `800 ${SPX * .7}px "Barlow Condensed", "Arial Narrow", sans-serif`, txt = p.name.toUpperCase();
+      g.font = FONT; const wPx = Math.min(SPX * 6, Math.max(SPX * 2.6, Math.ceil(g.measureText(txt).width + SPX * .9)));
+      cv.width = wPx; cv.height = SPX; f.signW = wPx / SPX; // panel size in world units (1 unit high)
+      const draw = () => { g.fillStyle = '#16181d'; g.fillRect(0, 0, cv.width, cv.height);
+        g.fillStyle = p.color; g.fillRect(0, cv.height - SPX * .1, cv.width, SPX * .1); g.fillRect(0, 0, cv.width, SPX * .04);
+        g.font = FONT; g.fillStyle = '#f2f0ea'; g.textAlign = 'center'; g.textBaseline = 'middle';
+        const tw = g.measureText(txt).width, room = cv.width - SPX * .6, sx = tw > room ? room / tw : 1;
+        g.save(); g.translate(cv.width / 2, cv.height * .47); g.scale(sx, 1); g.fillText(txt, 0, 0); g.restore(); if (f.nameTex) f.nameTex.needsUpdate = true; };
+      draw(); f.nameTex = new THREE.CanvasTexture(cv); f.nameTex.colorSpace = THREE.SRGBColorSpace; f.nameTex.anisotropy = 4;
+      if (document.fonts) document.fonts.ready.then(draw); // redraw once the web font is in
+      f.signM = new THREE.MeshBasicMaterial({ map: f.nameTex, transparent: true, toneMapped: false }); }
     f.op = 0; f.run = 0; f.wait = 0; f.need = 0;
-    f.hit = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), invisM); f.grp.add(f.hit); ctx.addPickable(f.hit, { kind: 'project', id: p.id });
+    f.hit =new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), invisM); f.grp.add(f.hit); ctx.addPickable(f.hit, { kind: 'project', id: p.id });
     const ne = document.createElement('div'); ne.className = 'sign fac'; ne.style.setProperty('--c', p.color); ne.innerHTML = `<i class="sw" style="--c:${p.color}"></i><span></span><small class="cl"></small><b class="need"></b>`;
     ne.addEventListener('click', () => ctx.focus('project', p.id));
     f.nameT = ne.querySelector('span'); f.needT = ne.querySelector('.need'); f.nameEl = ne; f.nameT.textContent = p.name; f.nameLab = new ctx.CSS2DObject(ne); f.nameLab.center.set(.5, 1); f.grp.add(f.nameLab);
@@ -981,7 +1020,8 @@ function buildScene(ctx) {
     for (const [x, z] of [[-HX + 1.4, hz - 1.2], [HX - 1.4, hz - 1.2], [HX - 1.4, -hz + 1.6]]) rd.push(new THREE.BoxGeometry(.9, .45, .9).translate(x, .38, z), new THREE.BoxGeometry(1.1, .08, 1.1).translate(x, .64, z)); // roof vents
     const chx = -HX + 1.4, chz = -hz + 1.2; rd.push(new THREE.CylinderGeometry(.26, .32, 2.2, 12).translate(chx, 1.2, chz));
     sadd(roofG, rs, f.roofM, true, true); sadd(roofG, rd, f.roofDM, true, false); sadd(roofG, sky, f.skyM, false, false);
-    const bcn = new THREE.Mesh(new THREE.CylinderGeometry(.3, .3, .5, 14).translate(0, .25, 0), f.beaconM); bcn.position.set(HX - .7, .16, -hz + .7); roofG.add(bcn);
+    sadd(roofG, [new THREE.CylinderGeometry(.5, .55, .16, 16).translate(0, .3, 0)], f.roofDM, true, false); // siren plinth, centre of the roof
+    const bcn = new THREE.Mesh(new THREE.CylinderGeometry(.34, .34, .55, 16).translate(0, .38 + .275, 0), f.beaconM); roofG.add(bcn);
     f.smokeAt = [chx, chz]; f.smoke.forEach(m => f.grp.add(m));
     // session lines: frames, rails, pads and floor paint are per line (lineParts) so they slide when lines re-layout
     const stl = [], rails = [], pads = [], paint = [], dk = [];
@@ -1005,7 +1045,17 @@ function buildScene(ctx) {
     f.rolDirty = true;
     add(dk, f.ctM, false, true); add(stl, dark); add(rails, rail, false, false); add(pads, f.padM, false, true); add(paint, f.accentM, false, false);
     f.hit.geometry.dispose(); f.hit.geometry = new THREE.BoxGeometry(FW, 1, D).translate(0, .5, 0);
-    f.nameLab.position.set(0, CH + .45, -f.d * hz);
+    // roof name sign: a fixed panel along the front edge of the roof, on poles with back struts; it lifts and fades with the roof
+    { const SH = 2, W = f.signW * SH, y0 = .8, yc = y0 + SH / 2, sg = new THREE.Group(), st = [];
+      sg.position.set(0, 0, f.d * (hz - .55)); sg.rotation.y = f.d > 0 ? 0 : Math.PI; roofG.add(sg); // the panel faces the front (world +z) for every hall
+      const px = W > 6 ? [-W / 2 + .5, 0, W / 2 - .5] : [-W / 2 + .4, W / 2 - .4];
+      for (const x of px) { st.push(new THREE.BoxGeometry(.12, y0 + SH - .1, .12).translate(x, .16 + (y0 + SH - .26) / 2, -.12)); // pole
+        st.push(new THREE.BoxGeometry(.09, .09, 2).rotateX(-.78).translate(x, .95, -.8)); } // back strut down to the roof
+      st.push(new THREE.BoxGeometry(W + .14, SH + .14, .08).translate(0, yc, -.06)); // backing board
+      sadd(sg, st, f.roofDM, true, false);
+      const face = new THREE.Mesh(new THREE.PlaneGeometry(W, SH).translate(0, yc, -.015), f.signM); sg.add(face);
+      if (f.signHit) ctx.removePickable(f.signHit); f.signHit = face; ctx.addPickable(face, { kind: 'project', id: f.id });
+      f.nameLab.position.set(0, CH + 1.4, 0); } // the CSS tag only shows "needs you", above the siren
     f.subAt = [new THREE.Vector3(-HX + 3.2, 1.0, f.d * (hz + .2)), new THREE.Vector3(HX - 3.2, CH + .45, -f.d * hz)]; // overview: front corner; open hall: above the far wall toward the exit
     f.subLab.position.copy(f.subAt[f.det ? 1 : 0]);
     f.cbLab.position.set(0, 1.55, bz);
@@ -1015,9 +1065,9 @@ function buildScene(ctx) {
     for (const l of [...f.lines]) killLine(l);
     for (const c of cr) if (c.st === 'cross' && c.f === f) c.dead = true;
     if (f.fix) f.fix.traverse(o => o.geometry && o.geometry.dispose());
-    f.hit.geometry.dispose(); ctx.removePickable(f.hit); scene.remove(f.grp);
+    f.hit.geometry.dispose(); ctx.removePickable(f.hit); if (f.signHit) ctx.removePickable(f.signHit); scene.remove(f.grp);
     for (const lab of [f.nameLab, f.subLab, f.cbLab]) lab.element.remove();
-    [f.bt, f.beltM, f.ct, f.ctM, f.accentM, f.padM, f.rol, f.roofM, f.roofDM, f.skyM, f.beaconM, ...f.smoke.map(m => m.material)].forEach(d => d.dispose());
+    [f.bt, f.beltM, f.ct, f.ctM, f.accentM, f.padM, f.rol, f.roofM, f.roofDM, f.skyM, f.beaconM, f.signM, f.nameTex, ...f.smoke.map(m => m.material)].forEach(d => d.dispose());
     slotUsed[f.k] = null; if (f.dock.f === f) f.dock.f = null; facs.delete(f.id);
   }
   // ── lines: one conveyor per session
@@ -1831,12 +1881,16 @@ function buildScene(ctx) {
       const a = P.pts[r.pi], b = P.pts[r.pi + 1] || a, sl = (P.cum[r.pi + 1] ?? P.cum[r.pi]) - P.cum[r.pi], u = sl > 1e-6 ? (r.s - P.cum[r.pi]) / sl : 1; r.x = a[0] + (b[0] - a[0]) * u; r.z = a[1] + (b[1] - a[1]) * u; return; }
     for (let j = r.pi + 1; j < P.pts.length; j++) { const ds = P.cum[j] - r.s; if (ds > brake) break; vA = Math.min(vA, Math.sqrt(P.cap[j] * P.cap[j] + 2 * ACC * Math.max(0, ds))); }
     vA = Math.max(vA, .35); // creep speed so the final approach always ends
-    r.why = ''; r.wait = false; const g = aheadGap(r); if (g < 1e8) { const vg = Math.sqrt(2 * DEC * .8 * Math.max(0, g - GAPD)); if (vg < vA) { vA = vg; r.why = 'f'; } }
+    if (r.force > 0) { // "Drive" from the robot menu: ignore yields, boxes and spacing for a moment, so a jam (a full roundabout) clears
+      r.force -= dt; r.why = 'd'; r.wait = false; r.blk = null; r.stillT = 0;
+      for (const j of r.J) if (!j.held && !j.done && r.s > j.a - .6) j.done = true; // boxes driven through without a lock never stop me afterwards
+      r.v = Math.min(Math.min(vA, VC), r.v + ACC * dt); }
+    else { r.why = ''; r.wait = false; const g = aheadGap(r); if (g < 1e8) { const vg = Math.sqrt(2 * DEC * .8 * Math.max(0, g - GAPD)); if (vg < vA) { vA = vg; r.why = 'f'; } }
     const ms = mergeStop(r); if (ms < 1e8) { const vm = Math.sqrt(2 * DEC * Math.max(0, ms - r.s)); if (vm < vA) { vA = vm; r.why = 'm'; } r.wait = true; }
     const bs = boxStop(r); if (bs < 1e8) { const vb = Math.sqrt(2 * DEC * Math.max(0, bs - r.s)); if (vb < vA) { vA = vb; r.why = 'b'; } r.wait = true; }
     const ys = rbStop(r); if (ys < 1e8) { const vy = Math.sqrt(2 * DEC * Math.max(0, ys - r.s)); if (vy < vA) { vA = vy; r.why = 'y'; } r.wait = true; }
     r.v = r.v < vA ? Math.min(vA, r.v + ACC * dt) : Math.max(vA, r.v - DEC * dt);
-    if (r.v > 0 && sepHold(r, dt)) { r.v = 0; r.why = 'h'; return; } // hard guard: never close in on another robot (or the tow truck) below the robot length
+    if (r.v > 0 && sepHold(r, dt)) { r.v = 0; r.why = 'h'; return; } } // hard guard: never close in on another robot (or the tow truck) below the robot length
     r.s = Math.min(P.len, r.s + r.v * dt);
     while (r.pi < P.pts.length - 2 && P.cum[r.pi + 1] <= r.s) r.pi++;
     const a = P.pts[r.pi], b = P.pts[r.pi + 1] || a, sl = (P.cum[r.pi + 1] ?? P.cum[r.pi]) - P.cum[r.pi], u = sl > 1e-6 ? (r.s - P.cum[r.pi]) / sl : 1;
@@ -2161,7 +2215,7 @@ function buildScene(ctx) {
     if (f.op !== want) { f.op = reduced ? want : damp(f.op, want, 3.2, dt); if (Math.abs(f.op - want) < .004) f.op = want; }
     const e = easeIO(f.op), shut = f.op < .999, fade = 1 - Math.min(1, e * 1.4);
     if (f.shell) { f.shell.visible = shut; f.shell.scale.y = Math.max(.001, 1 - e); }
-    if (f.roofG) { f.roofG.visible = shut; f.roofG.position.y = CH + e * 5; for (const m of [f.roofM, f.roofDM, f.skyM, f.beaconM]) m.opacity = fade; }
+    if (f.roofG) { f.roofG.visible = shut; f.roofG.position.y = CH + e * 5; for (const m of [f.roofM, f.roofDM, f.skyM, f.beaconM, f.signM]) m.opacity = fade; }
     f.hit.scale.y = f.op > .5 ? 1 : CH + .3;
     // outside activity: skylights glow while agents run; roof beacon blue = needs you (flashing), amber = waiting, green = running
     f.skyM.emissiveIntensity = f.run ? .75 + Math.min(.35, f.run * .07) + (R ? Math.sin(t * 2 + f.k) * .08 : 0) : .08;
@@ -2170,7 +2224,7 @@ function buildScene(ctx) {
     else if (f.run) BC2.copy(GREEN).multiplyScalar(1.5); else BC2.set('#2a2d33');
     f.beaconM.color.copy(BC2);
     for (const m of f.smoke) { const on = !!f.run && !reduced && shut; m.visible = on; if (!on) continue; // chimney smoke while agents run
-      const u = (t * .25 + m.userData.ph) % 1; m.position.set(f.smokeAt[0] + u * .5, CH + e * 5 + 2.3 + u * 2.2, f.smokeAt[1] - u * .3); m.scale.setScalar(.6 + u * 1.6); m.material.opacity = .35 * Math.sin(u * Math.PI) * fade; }
+      const u = (t * .25 + m.userData.ph) % 1; m.position.set(f.smokeAt[0] + u * .5, CH + e * 5 + 2.3 + u * 2.2, f.smokeAt[1] - u * .3); m.scale.setScalar(.7 + u * 1.8); m.material.opacity = .82 * Math.sin(u * Math.PI) * fade; }
   }
   function frame(dt, t) {
     simT += dt; const t0 = performance.now(); frameBody(dt, t); frameMs = frameMs * .95 + (performance.now() - t0) * .05;
@@ -2368,7 +2422,15 @@ function buildScene(ctx) {
         else set('Break down', false, 'Force a robot breakdown: watch the tow truck and the repair garage', false); };
       b.addEventListener('click', () => { if (b.getAttribute('aria-disabled') === 'true') return; BRK.force(); upd(); });
       upd(); setInterval(upd, 250); } }
-  return { sync, frame, layoutLabels, focusOf, anchorOf, hover, home, unfocus() { focusF = null; markLine(null); }, onFloor: id => facs.has(id),
+  function robotAt(cx, cy) { // the robot under a screen point (instanced, so by projected distance), or null
+    const v = new THREE.Vector3(), W = innerWidth, H = innerHeight; let best = null, bd = Math.max(22, 32 * ctx.camera.zoom) ** 2; // generous: the robots are small and keep moving
+    for (const r of robots) { if (r.dying || r.born < 1) continue; v.set(r.x, .2, r.z).project(ctx.camera);
+      const d = ((v.x + 1) / 2 * W - cx) ** 2 + ((1 - v.y) / 2 * H - cy) ** 2; if (d < bd) { bd = d; best = r; } }
+    return best && { id: best.id, canDrive: best.st === 'go' && !best.broken && !best.towed && !best.shoulder, moving: best.v > .3 };
+  }
+  function driveRobot(id) { const r = robots.find(o => o.id === id); if (!r || r.st !== 'go' || r.broken || r.towed || r.shoulder) return false; r.force = 2.5; r.back = 0; return true; }
+  window.__fac.drive = driveRobot; // test hook
+  return { sync, frame, layoutLabels, focusOf, anchorOf, hover, home, robotAt, driveRobot, unfocus() { focusF = null; markLine(null); }, onFloor: id => facs.has(id),
     lineSlots: id => { const l = lineIdx.get(id); return l ? new Set(l.slots.filter(Boolean)) : null; } };
 }
 

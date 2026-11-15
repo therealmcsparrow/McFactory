@@ -1,50 +1,99 @@
 # Crate Works Live
 
-Live isometric factory of your Claude Code activity, read from `~/.claude/projects`.
+[![Validate](https://github.com/therealmcsparrow/McFactory/actions/workflows/validate.yml/badge.svg)](https://github.com/therealmcsparrow/McFactory/actions/workflows/validate.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Run: `node server.js [--port 4545] [--hours 24]`, then open http://127.0.0.1:4545 (binds to localhost only, Node built-ins, no install).
+**Your Claude Code activity as a live isometric factory.** Every project is a factory hall, every open session a conveyor line, every agent a robot arm, and every token a crate on its way to the warehouse. Chat with your sessions and answer their prompts from the same page.
 
-Mapping: factory hall = project (last folder of cwd; low walls, project-color accent, name sign, subtotal sign; up to 12 halls in a grid around the central warehouse, rest in the Factories list) · conveyor line = open session (live first, max 6 per hall, "+N more sessions"; line sign = title · tokens · status) · arm = running/waiting agent on that session (max 10 per line, "+N arms"; finished subagents have no arm, see Finished agents) · arm base = role, lower arm = model, upper arm = effort (dim to bright yellow), gripper = plain steel · all arms one size; pedestal bar gauge = agent tokens (log share of the biggest agent in the window; lit cyan while running, dim otherwise; exact numbers in tooltip and agent card) · crates = role color · tiny yellow robots (AGVs) = transport · warehouse pile = window total by role.
-Motion follows token flow: an arm only does a pick-and-place when tokens arrive (new usage, or a token rate in the last 60s); every cycle carries one crate (about 20k tokens of rate per crate, one crate at least per arrival). A running arm with no flow holds a ready pose over its pad. Crates ride the line to the hall exit, a cross conveyor feeds the outbound dock, and robots (2 to 12, scaled by dock throughput and backlog) carry up to 3 crates each to the warehouse pile; idle robots park at the charging bay. Every docked crate is delivered.
-Click a hall to fly to it and open the project card, a line for the session card (agents table, rows focus the arm), an arm for the agent card. Line signs show only in the open (focused) hall. A closed-session card on the info board opens its session card.
-Open vs closed: a session is open while a live Claude Code process holds it (`~/.claude/sessions/<pid>.json`, pid alive, `openBy: 'process'`), else when its transcript was active in the last 5 min (`openBy: 'recent'`); otherwise `closed: true` with `endedAt` = last activity. Only open sessions get a line. Closed sessions become cards on an info board on the hall's far wall, shown only when that hall is open: name (aico ID, else title) · tokens · cost · agents · duration · ended time, newest first, max 6 ("+N older"); hover = tooltip, click = session card. Overview name sign shows "N closed"; hall subtotal still counts closed sessions ("N open · M closed"). When a session closes its line retires: arms fold, crates already on it ride out to the dock, then the line is removed and the remaining lines slide together (eased).
-Status: running = active in last 90s; waiting = idle 90s to 10min, not finished; done = finished or idle over 10min; failed = API error.
-Finished agents: a subagent that is done or failed loses its arm. If it holds a crate it first puts it on the belt, then the arm folds and sinks into the floor (eased, ~1.6s; instant with reduced motion) and the remaining arms slide together (main stays slot 0, rest by start time). The main arm stays while the session is open. Each open line has a small finished sign under its line sign (open hall only): "N finished" + tokens and one role-colour chip per agent (newest first, max 12); hover, keyboard focus or a focused line opens the rows: role chip · role · model · tokens · done/failed · duration, top 4 + "+M more". Row/chip hover = agent tooltip, click = agent card (camera flies to the line). The line sign shows "N finished"; the session card marks them "on line sign". Closed-session cards on the hall board keep full totals (finished agents included).
-Arm order: main always in slot 0 (nearest the line start), then subagents by start time (oldest first); new agents append. Same order in the session card. Cap picks main, then needs-you, live, recent.
-Needs you (blue, beats amber): read from `~/.claude/sessions/<pid>.json` (Claude Code writes `status` busy/idle/waiting + `waitingFor`, pid must be alive). waiting + "input needed" = question (main); waiting + "permission prompt"/"sandbox request"/"worker request"/"goal proposal" = approval (agent with the newest open tool call, may be a subagent); "dialog open" ignored; idle with main active in the last 30min = your reply. No sessions folder: fallback from the transcript (open AskUserQuestion = question, open ExitPlanMode = approval, other prompting tool open over 4s outside bypass/dontAsk/auto = approval, turn ended with no background agents = your reply). Shows as flashing blue beacon (~1.5 Hz, steady with reduced motion), "needs you" on line and hall signs, KPI tile, blue rows in Arms working, a floor-log event. Rolled up to session (`needsHuman`, `needReason`, `needSince`) and project (`needsHuman` = count).
-aico project ID: a session that belongs to an aico run gets `aicoId` (e.g. `P20261112.000001`, step suffix like `/05-fix` dropped) and `aicoIdSource` on its task. Source order: newest `gitBranch` (`aico/<ID>`) or `cwd` (aico worktree path) over the main transcript and its subagents; else the ID in the first prompt; else the most frequent ID in subagent descriptions. Only the regex match leaves the server, never the text. The line sign shows the ID instead of the title (title stays in the tooltip, session card and Session table; card subtitle shows the ID too). Not `projectId`: that field already names the hall. A plain session on an `aico/*` branch also gets the ID.
-Tokens = input + output + cache write + cache read, deduped by message id, counted inside the window (1h / 6h / 24h / 7d selector).
-Cost = estimate from list prices; `*` or `n/a` = model with no known price.
-Privacy: for every session the dashboard did not start, the browser only gets numbers, model ids, tool names, the session title (first prompt, 60 chars), subagent descriptions and the aico project ID (regex match only). No message text, tool inputs or outputs. Dashboard-started sessions (below) are the one exception: their own chat log goes to this page, and nothing else's.
-API: `/api/state?hours=N` (JSON snapshot), `/api/stream?hours=N` (SSE), `/api/chat/*` (below).
+It runs on your own computer and reads `~/.claude/projects`. Your session data never leaves your computer.
 
-## Chat and New session (dashboard-owned sessions only)
-Files: `chat.js` + `chat.css` (served next to `index.html`; hooks in `index.html` are the `factory:detail` event and `window.__focus`).
-- **New session** button (left HUD, under the time window): project (known cwds from the snapshot, or "Other path" = any existing absolute folder), model (default/haiku/sonnet/opus), effort, first message (Ctrl+Enter starts). The session then flies into view as a normal line, marked `owned: true` (+ `chat: {alive, busy, pending}`) on its task in `/api/state`. Flags only, never text.
-- **Chat panel**: shows in the detail card (session or any of its agents) for owned sessions. Scrolling log (your text, Claude text, tool name + 100-char summary, turn result with cost), input (Enter sends, Shift+Enter newline), Stop. Permission requests render as a card (tool, description, input preview, Allow / Deny). `AskUserQuestion` renders as radio/checkbox options (multi-select supported) plus an "Other" text field, then Send answer / Skip.
-- **Needs you**: an owned session with a pending request is forced to needs-you (approval or question) in the snapshot, so the blue beacon, line/hall signs and KPI tile light up. A blue "Chat needs you" pill (bottom left) and the KPI tile open that session's chat and focus the request. Clicking the arm or line opens the same card.
-- **Terminal and desktop sessions**: title and IDs only, plus a permission card when the global hook is installed (next section). No chat, no message text.
-- **How it runs**: `claude -p --input-format stream-json --output-format stream-json --verbose --permission-prompt-tool stdio [--model m] [--effort e]`, `spawn(..., {shell:false, cwd})`. The binary is `$CLAUDE_BIN`, else `claude(.exe)` on PATH, else `~/.local/bin`. User text never goes into argv (only stdin); model is `haiku|sonnet|opus|claude-*`, effort `low|medium|high|xhigh|max`. Up to 8 live sessions; chat log kept in memory only (600 entries each, last 20 ended sessions), lost on restart.
-- **Stopping**: Stop = close stdin (clean exit 0), kill the process tree after 4s if it lingers. Ctrl+C on the server (SIGINT/SIGTERM/SIGBREAK) stops all owned sessions the same way. If the server is hard-killed, the child sees stdin close and exits on its own.
-- **Security**: bound to 127.0.0.1. Every request needs `Host` = `127.0.0.1:<port>` or `localhost:<port>` and, when sent, a matching `Origin` (else 403). A random per-run token is embedded in `index.html` at serve time (`<meta name="chat-token">`); POSTs need it in the `x-chat-token` header, the chat stream in `?token=`; wrong or missing = 403. POSTs must be `application/json` (max 256 KB). `cwd` must be a local absolute path to an existing directory.
-- **Chat API** (all need the token): `POST /api/chat/start {cwd, model, effort, prompt}` -> `{id}` (id = session id) · `POST /api/chat/:id/send {text}` · `POST /api/chat/:id/answer {request_id, behavior: allow|deny, answers?, message?}` (`answers` = `{questionText: label}`, multi-select labels joined by ", ") · `POST /api/chat/:id/stop` · `GET /api/chat/:id/stream?token=` (SSE: `init {meta, log}`, `entry`, `meta`).
+![The factory floor: five project halls around the warehouse, with the token counter, arm models and the floor log](documentation/images/floor.png)
 
-## Answer terminal/desktop prompts from the dashboard (global hook)
-A global Claude Code http hook in `~/.claude/settings.json` posts each permission prompt of your normal sessions (terminal and desktop app) to this server. The session's detail card then shows **Allow / Deny** (+ optional deny message). The terminal dialog is shown at the same time: **first answer wins**.
-- **Install**: `node server.js --install-hook` (merges into `~/.claude/settings.json`; other keys and hooks are kept, re-running replaces only our entry). Options: `--port N` (URL port, default 4545), `--settings <file>` (another file), `--with-ask` (also the AskUserQuestion entry, see below). **Remove**: `node server.js --uninstall-hook` (removes only entries whose URL is `http://127.0.0.1:<port>/hook/permission|pretool`; empty `hooks` leftovers are cleaned up). Manual removal: delete the `PermissionRequest` entry with that URL. Restart the server after updating it; hooks apply to Claude Code sessions started after the settings change (running ones usually pick it up too).
-- **Installed entry**: `{"hooks":{"PermissionRequest":[{"hooks":[{"type":"http","url":"http://127.0.0.1:4545/hook/permission","timeout":300}]}]}}`.
-- **Fail-open**: server down or connection refused = the hook is a non-blocking error and the normal terminal flow continues. Never set `onFailure:"block"`. While the dashboard is up, nothing changes in the terminal either; the hook only adds a second place to answer.
-- **Flow**: `POST /hook/permission` (loopback only, `Host` check, JSON body) registers a pending prompt per session (tool name + a 200-char summary: command, file path, pattern, url; never file content, never the full input) and holds the response. The session is forced to needs-you (approval) in the snapshot, `task.ext = {pending}` (flags only), and `chat.js` opens `GET /api/ext/:sid/stream?token=` for the card. Allow/Deny = `POST /api/ext/:sid/answer {id, behavior, message?}` (same `x-chat-token` as chat). The hook gets `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}` or `{"behavior":"deny","message":"..."}`.
-- **Release without a decision (empty 200, terminal decides)**: the session's `~/.claude/sessions/<pid>.json` goes from waiting to something else (you answered in the terminal), the process is gone, the transcript gets new lines after the prompt (1.5 s grace), the hook connection closes, or 280 s pass (hook `timeout` is 300). Anything doubtful ends this way, so the worst case is "answer in the terminal as before".
-- **Not touched**: dashboard-owned sessions (answered over stdio, so the hook answers empty at once), `AskUserQuestion` on the permission hook, bodies that are not valid JSON, more than 8 prompts per session or 20 overall. `node server.js --no-hook` turns the whole thing off (every hook call answers empty immediately).
-- **Security**: the hook endpoint has no secret: http hooks only send headers from env vars the Claude process has, and the desktop app does not share your shell env. It is loopback-only with the Host/Origin checks of the rest of the server, JSON only, and a caller can at most show a card (answering still needs the page token). Any local process could register a fake card; that is the same trust level as the rest of this local-only server.
-- **AskUserQuestion (OFF)**: `POST /hook/pretool` (PreToolUse, matcher `AskUserQuestion`) answers with `permissionDecision:"allow"` + `updatedInput {questions, answers}`; the card is the existing question card. It is off (`--ask-hook` or `AICO_DASH_ASK=1` to enable the endpoint, `--install-hook --with-ask` for the settings entry) because it is not verified whether the terminal question dialog shows while a PreToolUse hook is pending; if it only shows after the hook returns, the terminal would be delayed until you answer or the hook times out. Probe first: (1) in a throwaway folder add a PreToolUse command hook, matcher `AskUserQuestion`, that appends a timestamp to a log, sleeps 20 s, appends a timestamp, exits 0; (2) start an interactive `claude` there and ask it to use AskUserQuestion; (3) note whether the question dialog appears right away (enable the feature) or only after about 20 s (leave it off). Headless `-p` has no AskUserQuestion tool, so it cannot be probed there.
-- **Known limits**: first-answer-wins is verified headless only (dashboard answer first = used, terminal not testable by script); that the terminal dialog closes when the hook answers first, and that the hook is released when you answer in the terminal, are handled by the release rules above but untested in the interactive TUI. Test env knobs: `AICO_DASH_HOLD_MS` (hold time), `AICO_DASH_NO_SWEEP=1` (tests only).
+<sub>Screenshots use made-up demo data (`dev/demo/make-demo.js`).</sub>
 
-## Desktop app (Tauri, step 1)
-`desktop/` wraps the same page in a Tauri 2 window. `server.js` is compiled into one executable (Node single executable application, about 100 MB because it contains Node) and runs as a Tauri sidecar on `127.0.0.1:4545`, the port the global hook uses. The page files ship as app resources; the sidecar gets their folder through `--static <dir>` (a `server.js` option; default is the folder of `server.js`).
-- **Dev**: `cd desktop`, `npm install`, `npm run dev`. **Installer**: `npm run build`, output in `desktop/src-tauri/target/release/bundle/nsis/`. Needs Rust and Node 25.5 or later (for `--build-sea`).
-- **Start**: the window shows a local "Starting" page, then opens `http://127.0.0.1:4545/` once the port answers (error text on that page if the server stops or does not answer within 60 s). If 4545 already answers (your own `node server.js`), the app opens that server and starts no sidecar.
-- **Stop**: closing the window kills the sidecar (hard stop). Dashboard-started Claude sessions see their stdin close and exit on their own.
-- **Testing next to a running server**: `CRATE_WORKS_PORT=4598` picks another port; the global hook only reaches 4545.
-- The dashboard is a remote (127.0.0.1) page in the webview and gets no Tauri API access; only the local loading page has the default core permissions.
+## Contents
+
+- [Features](#features)
+- [Quick start](#quick-start)
+- [Desktop app](#desktop-app)
+- [Screenshots](#screenshots)
+- [Documentation](#documentation)
+- [Security and privacy](#security-and-privacy)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Features
+
+- **See everything at a glance.** Halls, lines and arms show which sessions and agents are running, waiting or done. Arm colours show role, model and effort. Totals for tokens, estimated cost and tools are always on screen.
+- **Needs you.** A blue beacon and signs show when a session waits for your answer or approval.
+- **Start and chat with sessions.** Start a new Claude Code session in any folder, then chat with it, answer its permission prompts and questions, and use its slash commands.
+- **Talk to terminal and desktop sessions.** Send messages to sessions you started in the Claude CLI or the desktop app.
+- **Answer prompts from the dashboard.** An optional global hook shows the permission prompts of all your sessions as Allow / Deny cards. The first answer wins, so the terminal keeps working as before.
+- **Usage.** Plan limits (5-hour and weekly) plus tokens and cost per day and hour, split by model.
+- **No install.** The server uses Node built-ins only.
+
+## Quick start
+
+You need [Node.js](https://nodejs.org/) 22 or later and Claude Code.
+
+```sh
+git clone https://github.com/therealmcsparrow/McFactory.git
+cd McFactory
+node server.js
+```
+
+Open <http://127.0.0.1:4545>. If you have no status line yet, the server adds one to `~/.claude/settings.json` so it can read your plan limits (`--no-statusline` skips this).
+
+To answer the prompts of your terminal sessions from the dashboard too:
+
+```sh
+node server.js --install-hook
+```
+
+Options, environment variables and tests are in [Getting started](documentation/getting-started.md).
+
+## Desktop app
+
+`desktop/` wraps the same page in a Tauri 2 window, with the server built in. Windows installers are attached to each [release](https://github.com/therealmcsparrow/McFactory/releases). See [Desktop app](documentation/desktop-app.md) to build it yourself.
+
+## Screenshots
+
+**A session up close.** Click a line for its session card: agents, tokens, cost and status. The session that needs you glows blue.
+
+![A session card listing its agents, next to the line with its robot arms](documentation/images/session.png)
+
+**Usage.** Plan limits over time, and tokens or cost per day by model.
+
+![The Usage view with plan limits and a per-day token chart](documentation/images/usage.png)
+
+## Documentation
+
+| Guide | What it covers |
+|-------|----------------|
+| [Getting started](documentation/getting-started.md) | Requirements, starting the server, options, tests |
+| [The factory view](documentation/factory-view.md) | What every hall, line, arm and crate means |
+| [Chat and new sessions](documentation/chat.md) | Starting sessions from the dashboard and chatting with them |
+| [Terminal and desktop sessions](documentation/peer-chat.md) | Sending messages to sessions you started elsewhere |
+| [Answer prompts from the dashboard](documentation/permission-hook.md) | The global permission hook |
+| [Usage and plan limits](documentation/usage.md) | The Usage view and where its numbers come from |
+| [Desktop app](documentation/desktop-app.md) | The Tauri app |
+| [HTTP API](documentation/api.md) | Every endpoint |
+| [Security and privacy](documentation/security-and-privacy.md) | What the server accepts, shows and stores |
+| [Troubleshooting](documentation/troubleshooting.md) | Common problems |
+
+## Security and privacy
+
+- The server listens on `127.0.0.1` only and refuses other host names and other websites.
+- Everything that starts, steers or answers a session needs a random token made at each start.
+- For sessions the dashboard did not start, the page gets numbers, model names, tool names and session titles only. Message text appears only in an open chat panel.
+- Session data never leaves your computer. The page itself loads the three.js library from jsDelivr and its fonts from Google Fonts; those services see your IP address, nothing else.
+
+Details in [Security and privacy](documentation/security-and-privacy.md). To report a vulnerability, see [SECURITY.md](SECURITY.md).
+
+## Contributing
+
+Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first, and run `npm test` before you open a pull request.
+
+## License
+
+[MIT](LICENSE)
