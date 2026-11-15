@@ -934,7 +934,7 @@ function buildScene(ctx) {
     f.roofM = mat('#2e343c', { metalness: .55, roughness: .5, transparent: true }); f.roofDM = mat('#22262c', { metalness: .5, roughness: .45, transparent: true });
     f.skyM = new THREE.MeshStandardMaterial({ color: '#1a2230', emissive: '#ffd08a', emissiveIntensity: .1, roughness: .2, metalness: .3, transparent: true });
     f.beaconM = new THREE.MeshBasicMaterial({ color: '#222222', toneMapped: false, transparent: true });
-    f.smoke = [0, 1, 2].map(i => { const m = new THREE.Mesh(smokeG, new THREE.MeshBasicMaterial({ color: '#e4e9ef', transparent: true, opacity: 0, depthWrite: false })); m.userData.ph = i / 3; m.visible = false; return m; });
+    f.smoke = [0, 1, 2].map(i => { const m = new THREE.Mesh(smokeG, new THREE.MeshBasicMaterial({ color: '#f4f2ee', transparent: true, opacity: 0, depthWrite: false })); m.userData.ph = i / 3; m.visible = false; return m; });
     f.op = 0; f.run = 0; f.wait = 0; f.need = 0;
     f.hit = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), invisM); f.grp.add(f.hit); ctx.addPickable(f.hit, { kind: 'project', id: p.id });
     const ne = document.createElement('div'); ne.className = 'sign fac'; ne.style.setProperty('--c', p.color); ne.innerHTML = `<i class="sw" style="--c:${p.color}"></i><span></span><small class="cl"></small><b class="need"></b>`;
@@ -2210,7 +2210,7 @@ function buildScene(ctx) {
     else if (f.run) BC2.copy(GREEN).multiplyScalar(1.5); else BC2.set('#2a2d33');
     f.beaconM.color.copy(BC2);
     for (const m of f.smoke) { const on = !!f.run && !reduced && shut; m.visible = on; if (!on) continue; // chimney smoke while agents run
-      const u = (t * .25 + m.userData.ph) % 1; m.position.set(f.smokeAt[0] + u * .5, CH + e * 5 + 2.3 + u * 2.2, f.smokeAt[1] - u * .3); m.scale.setScalar(.7 + u * 1.8); m.material.opacity = .7 * Math.sin(u * Math.PI) * fade; }
+      const u = (t * .25 + m.userData.ph) % 1; m.position.set(f.smokeAt[0] + u * .5, CH + e * 5 + 2.3 + u * 2.2, f.smokeAt[1] - u * .3); m.scale.setScalar(.7 + u * 1.8); m.material.opacity = .82 * Math.sin(u * Math.PI) * fade; }
   }
   function frame(dt, t) {
     simT += dt; const t0 = performance.now(); frameBody(dt, t); frameMs = frameMs * .95 + (performance.now() - t0) * .05;
