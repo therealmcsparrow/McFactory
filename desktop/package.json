@@ -1,0 +1,14 @@
+{
+  "name": "crate-works-live-desktop",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sidecar": "node scripts/build-sidecar.mjs",
+    "icons": "tauri icon icon.svg",
+    "dev": "node scripts/build-sidecar.mjs && tauri dev",
+    "build": "node scripts/build-sidecar.mjs && tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4"
+  }
+}

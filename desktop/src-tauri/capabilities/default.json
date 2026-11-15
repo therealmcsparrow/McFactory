@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Local loading page only. The dashboard itself is a remote (127.0.0.1) page and gets no Tauri API access.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Crate Works Live",
+  "version": "0.1.0",
+  "identifier": "com.crateworks.live",
+  "build": {
+    "frontendDist": "../loading"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Crate Works Live",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 900,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
+    "externalBin": ["binaries/server"],
+    "resources": {
+      "../../index.html": "web/index.html",
+      "../../live-data.js": "web/live-data.js",
+      "../../chat.js": "web/chat.js",
+      "../../chat.css": "web/chat.css"
+    }
+  }
+}
