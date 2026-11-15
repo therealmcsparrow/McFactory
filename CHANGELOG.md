@@ -15,6 +15,10 @@ All notable changes to this project are listed here.
 -   Right-click a transport robot and choose **Drive** to clear a jam.
 -   Documentation folder, demo data generator (`dev/demo/make-demo.js`), GitHub workflows and project policies.
 
+### Changed
+
+-   Hall names hang on a billboard over the road at the front of each hall, the siren sits in the middle of the roof, and the chimney smoke is lighter so it shows on the dark floor.
+
 ### Fixed
 
 -   The folder browser no longer shows when the New session dialog opens.

@@ -6,7 +6,7 @@ The page draws your Claude Code activity as an isometric factory. Everything on 
 
 | On screen | What it stands for |
 |-----------|-------------------|
-| Factory hall | A project: the last folder name of the session's working folder. Up to 12 halls stand in a grid around the central warehouse; the rest are in the Factories list. Each hall has a name sign and a subtotal sign. |
+| Factory hall | A project: the last folder name of the session's working folder. Up to 12 halls stand in a grid around the central warehouse; the rest are in the Factories list. Each hall has its name on a billboard over the road at its front corner, a siren in the middle of the roof, and a subtotal sign. |
 | Conveyor line | An open session. Live sessions come first, at most 6 per hall ("+N more sessions"). The line sign shows title, tokens and status. |
 | Robot arm | A running or waiting agent on that session, at most 10 per line ("+N arms"). |
 | Arm base, lower arm, upper arm | Role, model and effort (dim to bright yellow). All arms are the same size. |
