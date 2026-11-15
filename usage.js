@@ -38,7 +38,7 @@
   daysSel.addEventListener('change', () => { days = +daysSel.value; LS.set('usage.days', days); load(); });
   const segBtn = (v, l) => h('button', { type: 'button', 'data-v': v, 'aria-pressed': String(metric === v), onclick: () => { metric = v; LS.set('usage.metric', v); for (const b of seg.children) b.setAttribute('aria-pressed', String(b.dataset.v === v)); render(); } }, l);
   const seg = h('div', { class: 'us-seg', role: 'group', 'aria-label': 'Measure' }, segBtn('tokens', 'Tokens'), segBtn('cost', 'Cost'));
-  const closeBtn = h('button', { type: 'button', class: 'us-x', 'aria-label': 'Close usage', onclick: () => dlg.close() }, '×');
+  const closeBtn = h('button', { type: 'button', class: 'us-x', 'aria-label': 'Close usage', onclick: () => dlg.close() });
   const dlg = h('dialog', { class: 'us', 'aria-labelledby': 'us-title' },
     h('div', { class: 'us-box' },
       h('div', { class: 'us-head' }, h('h2', { id: 'us-title', text: 'Usage' }), h('div', { class: 'us-ctl' }, seg, daysSel, closeBtn)),
