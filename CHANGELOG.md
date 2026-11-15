@@ -17,7 +17,8 @@ All notable changes to this project are listed here.
 
 ### Changed
 
--   Hall names hang on a billboard over the road at the front of each hall, the siren sits in the middle of the roof, and the chimney smoke is lighter so it shows on the dark floor.
+-   Hall names are on a fixed sign on poles along the front of the roof (no closed-session count; a floating tag only shows "needs you"), the siren sits in the middle of the roof, and the chimney smoke is lighter so it shows on the dark floor.
+-   Transport robots are easier to right-click: a bigger hit area, and the cursor changes over a robot.
 
 ### Fixed
 
