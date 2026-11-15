@@ -30,7 +30,8 @@
       "../../index.html": "web/index.html",
       "../../live-data.js": "web/live-data.js",
       "../../chat.js": "web/chat.js",
-      "../../chat.css": "web/chat.css"
+      "../../chat.css": "web/chat.css",
+      "../../usage.js": "web/usage.js"
     }
   }
 }
