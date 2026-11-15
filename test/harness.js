@@ -42,9 +42,9 @@ class Harness {
     return fp;
   }
   append(fp, lines) { fs.appendFileSync(fp, lines.map(l => (typeof l === 'string' ? l : JSON.stringify(l)) + '\n').join('')); }
-  async start() {
+  async start(extra = []) {
     this.port = await freePort();
-    this.proc = spawn(process.execPath, [SERVER, '--port', String(this.port), '--root', this.projects, '--no-hook'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    this.proc = spawn(process.execPath, [SERVER, '--port', String(this.port), '--root', this.projects, '--no-hook', ...extra], { stdio: ['ignore', 'pipe', 'pipe'] });
     this.proc.stdout.on('data', d => { this.out += d; });
     this.proc.stderr.on('data', d => { this.out += d; });
     const up = await until(() => /factory/.test(this.out), 8000);

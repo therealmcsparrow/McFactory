@@ -79,6 +79,100 @@ function hookCli() {
 }
 if (argv.includes('--install-hook') || argv.includes('--uninstall-hook')) hookCli();
 
+// ───────────── plan limits via Claude Code's status line
+// Claude Code hands rate_limits (5-hour / 7-day % used, reset time) only to a status line command, so the server
+// can register itself as one. That mode saves ONLY those numbers (never cwd, session id, paths or model) and prints a line.
+const CLAUDE_DIR = path.dirname(ROOT);
+const SETTINGS_FILE = path.resolve(arg('settings', path.join(CLAUDE_DIR, 'settings.json')));
+const LIMITS_FILE = path.join(CLAUDE_DIR, 'crate-works-limits.json');
+const LIMITS_HIST = path.join(CLAUDE_DIR, 'crate-works-limits.jsonl');
+const LIMITS_HIST_MAX = 200e3;
+const SL_OFF = argv.includes('--no-statusline');
+const WIN_RE = /^[a-z0-9_]{1,40}$/;
+const isSea = (() => { try { return require('node:sea').isSea(); } catch { return false; } })();
+const slOurs = sl => !!(sl && typeof sl === 'object' && typeof sl.command === 'string' && /(^|\s)--statusline(\s|$)/.test(sl.command));
+function slCommand() {
+  const q = p => '"' + String(p).replace(/\\/g, '/') + '"';
+  return (isSea ? q(process.execPath) : q(process.execPath) + ' ' + q(__filename)) + ' --statusline' + (argv.includes('--root') ? ' --root ' + q(ROOT) : '');
+}
+function readSettings() { // -> object | null (unreadable or not an object: never written)
+  try { const c = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); return c && typeof c === 'object' && !Array.isArray(c) ? c : null; }
+  catch (e) { return e.code === 'ENOENT' ? {} : null; }
+}
+function writeSettings(cfg) {
+  const tmp = SETTINGS_FILE + '.aico-tmp';
+  fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + '\n'); fs.renameSync(tmp, SETTINGS_FILE);
+}
+function slState() { // 'off' | 'ours' | 'foreign' | 'none' | 'unreadable'
+  if (SL_OFF) return 'off';
+  const cfg = readSettings(); if (!cfg) return 'unreadable';
+  return !cfg.statusLine ? 'none' : slOurs(cfg.statusLine) ? 'ours' : 'foreign';
+}
+function slEnsure() { // on startup: set ours when none is set, refresh ours when its path moved, never touch a foreign one
+  if (SL_OFF) return;
+  const cfg = readSettings();
+  if (!cfg) { console.log('status line: ' + SETTINGS_FILE + ' unreadable, not touched'); return; }
+  const want = slCommand();
+  if (cfg.statusLine && !slOurs(cfg.statusLine)) return;
+  if (cfg.statusLine && cfg.statusLine.command === want) return;
+  cfg.statusLine = { type: 'command', command: want };
+  try { writeSettings(cfg); console.log('status line: installed in ' + SETTINGS_FILE); } catch (e) { console.log('status line: cannot write ' + SETTINGS_FILE + ': ' + e.code); }
+}
+function resetMs(v) {
+  const n = typeof v === 'number' ? (v < 1e12 ? v * 1000 : v) : typeof v === 'string' ? Date.parse(v) : NaN;
+  return Number.isFinite(n) ? Math.round(n) : null;
+}
+function cleanLimits(rl) { // rate_limits -> {windows:{key:{pct,resetsAt}}, spend?} | null
+  if (!rl || typeof rl !== 'object') return null;
+  const windows = {}; let spend = null;
+  for (const k of Object.keys(rl).slice(0, 20)) {
+    const w = rl[k]; if (!WIN_RE.test(k) || !w || typeof w !== 'object') continue;
+    if (k === 'spend_limit') {
+      const used = +w.used_usd, lim = +w.limit_usd;
+      if (Number.isFinite(used) && Number.isFinite(lim)) spend = { used: Math.round(used * 100) / 100, limit: Math.round(lim * 100) / 100, period: typeof w.period === 'string' && WIN_RE.test(w.period) ? w.period : '' };
+      continue;
+    }
+    const pct = +w.used_percentage; if (!Number.isFinite(pct)) continue;
+    windows[k] = { pct: Math.round(Math.max(0, Math.min(100, pct)) * 10) / 10, resetsAt: resetMs(w.resets_at) };
+  }
+  if (!Object.keys(windows).length && !spend) return null;
+  return spend ? { windows, spend } : { windows };
+}
+function statuslineCli() {
+  let input = {};
+  try { input = JSON.parse(fs.readFileSync(0, 'utf8')); } catch { }
+  const lim = cleanLimits(input && input.rate_limits);
+  if (lim) {
+    try {
+      const now = Date.now();
+      const tmp = LIMITS_FILE + '.aico-tmp';
+      fs.writeFileSync(tmp, JSON.stringify(Object.assign({ at: now }, lim))); fs.renameSync(tmp, LIMITS_FILE);
+      const w = {}; for (const k of Object.keys(lim.windows)) w[k] = lim.windows[k].pct;
+      let last = null;
+      try { const txt = fs.readFileSync(LIMITS_HIST, 'utf8'); const ls = txt.trimEnd().split('\n'); last = JSON.parse(ls[ls.length - 1]).w; if (txt.length > LIMITS_HIST_MAX) fs.writeFileSync(LIMITS_HIST, ls.slice(ls.length >> 1).join('\n') + '\n'); } catch { }
+      if (JSON.stringify(last) !== JSON.stringify(w)) fs.appendFileSync(LIMITS_HIST, JSON.stringify({ t: now, w }) + '\n');
+    } catch { }
+  }
+  const m = input && input.model && typeof input.model === 'object' ? input.model : {};
+  const parts = [];
+  const name = String(m.display_name || m.id || '').replace(/[\x00-\x1f\x7f]/g, '').slice(0, 40); if (name) parts.push(name);
+  const fmt = p => (Math.round(p * 10) / 10) + '%';
+  if (lim && lim.windows.five_hour) parts.push('5h ' + fmt(lim.windows.five_hour.pct));
+  if (lim && lim.windows.seven_day) parts.push('week ' + fmt(lim.windows.seven_day.pct));
+  try { fs.writeSync(1, (parts.join(' · ') || 'Claude') + '\n'); } catch { }
+  process.exit(0);
+}
+function slUninstallCli() {
+  const cfg = readSettings();
+  if (!cfg) { console.error(SETTINGS_FILE + ' unreadable (not touched)'); process.exit(1); }
+  if (slOurs(cfg.statusLine)) { delete cfg.statusLine; writeSettings(cfg); console.log('status line removed from ' + SETTINGS_FILE); }
+  else console.log('no status line of ours in ' + SETTINGS_FILE + ' (not touched)');
+  process.exit(0);
+}
+if (argv.includes('--statusline')) statuslineCli();
+else if (argv.includes('--uninstall-statusline')) slUninstallCli();
+
 // ───────────── pricing (USD per million tokens). Source: claude-api skill model table, cached 2026-11-03.
 // cacheWrite = 1.25 × input (5-minute cache write). Unknown model → cost 0 and costKnown=false.
 const PRICES = [
@@ -491,6 +585,45 @@ function snapshot(hours) {
   const json = JSON.stringify(s);
   const r = { ver: version, at: Date.now(), json, body };
   snapCache.set(hours, r); return r;
+}
+
+// ───────────── usage view: hourly token/cost buckets per model, plus the plan limits our status line saved
+const USAGE_MAX_DAYS = 31, USAGE_HIST_MAX = 5000;
+function readLimits() {
+  try {
+    const o = JSON.parse(fs.readFileSync(LIMITS_FILE, 'utf8'));
+    return o && typeof o === 'object' && o.windows && typeof o.windows === 'object' ? o : null;
+  } catch { return null; }
+}
+function readLimitsHist(since) {
+  try {
+    const out = [];
+    for (const l of fs.readFileSync(LIMITS_HIST, 'utf8').split('\n')) {
+      if (!l) continue;
+      try { const o = JSON.parse(l); if (o && +o.t >= since && o.w && typeof o.w === 'object') out.push({ t: +o.t, w: o.w }); } catch { }
+    }
+    return out.slice(-USAGE_HIST_MAX);
+  } catch { return []; }
+}
+function usage(days) {
+  days = Math.max(1, Math.min(USAGE_MAX_DAYS, Math.round(+days) || 14));
+  const now = Date.now(), since = now - days * 24 * HOUR;
+  if (since < loadedSince) { loadedSince = since; rescanAt = 0; pump(); }
+  const buckets = new Map(); // hour start -> {label: [tokens, output, cost]}
+  for (const a of agents.values()) for (const m of a.msgs.values()) {
+    if (!(m.ts >= since)) continue;
+    const t = Math.floor(m.ts / HOUR) * HOUR;
+    let b = buckets.get(t); if (!b) buckets.set(t, b = {});
+    const info = modelInfo(m.model), p = info.price;
+    const x = b[info.label] || (b[info.label] = [0, 0, 0]);
+    x[0] += m.in + m.out + m.cw + m.cr; x[1] += m.out;
+    if (p) x[2] += (m.in * p.inP + m.out * p.outP + m.cw * p.cwP + m.cr * p.crP) / 1e6;
+  }
+  const hours = [...buckets.entries()].sort((a, b) => a[0] - b[0]).map(([t, m]) => {
+    for (const k of Object.keys(m)) m[k][2] = Math.round(m[k][2] * 1e6) / 1e6;
+    return { t, m };
+  });
+  return { now, days, since, bucketMs: HOUR, loading: pendingBytes > 0, hours, limits: readLimits(), history: readLimitsHist(since), statusline: slState() };
 }
 
 // ───────────── owned chat sessions
@@ -1062,6 +1195,10 @@ const server = http.createServer((req, res) => {
     for (const c of clients) { c.last = ''; try { push(c); } catch { clients.delete(c); } }
     return sendJson(res, 200, { ok: true });
   }
+  if (u.pathname === '/api/usage') {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'GET only' });
+    return sendJson(res, 200, usage(u.searchParams.get('days')));
+  }
   const hours = u.searchParams.get('hours') || DEFAULT_HOURS;
   if (u.pathname === '/api/state') {
     const s = snapshot(hours);
@@ -1106,4 +1243,5 @@ setInterval(() => {
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`Claude Code factory → http://127.0.0.1:${PORT}/  (window ${DEFAULT_HOURS}h, ${files.size} transcripts tracked, ${(pendingBytes / 1e6).toFixed(1)} MB still to read)`);
   console.log(`source: ${ROOT}`);
+  slEnsure();
 });
