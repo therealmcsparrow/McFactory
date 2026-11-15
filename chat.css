@@ -112,6 +112,8 @@ dialog.cn::backdrop{background:oklch(10% 0.005 260 / .72);backdrop-filter:blur(3
 .chat-now:has(input[disabled]){opacity:.5;cursor:default}
 .cm.peer{box-shadow:inset 2px 0 0 var(--color-signal)}
 .cm.peer.other{align-self:flex-start;background:var(--color-raise)}
+.cm.peer.held{box-shadow:inset 2px 0 0 var(--color-bad-ink);opacity:.85}
+.cm.peer.held em{display:block;margin-top:4px;font-style:normal;font-size:11px;color:var(--color-bad-ink)}
 .chat-head .cb-btn[hidden]{display:none}
 .chat-err{font:500 11px var(--font-mono);color:var(--color-bad-ink)}
 .chat-err:empty{display:none}

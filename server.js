@@ -874,7 +874,7 @@ function peerSeen(sid, pid, status) { // from readLive: a session that changed s
 // conversation stream: one tail per session while at least one chat panel listens; read from the transcript.
 // Only user text, peer messages, assistant text and tool name + short summary. No tool input beyond that, no tool output.
 const PEER_LOG = 200, PEER_LINE_MAX = 1 << 20, PEER_INIT_BYTES = 16 << 20, PEER_CHUNK = 8 << 20;
-const PEER_HEAD = 'Another Claude session sent a message:\n', PEER_TAIL = '\n\nThis came from another Claude session';
+const PEER_HEAD = 'Another Claude session sent a message:\n', PEER_TAIL = '\n\nThis came from another Claude session', PEER_HELD = 'Held peer message';
 const peerTails = new Map(); // sessionId -> {sid, fp, offset, carry, skip, log, seq, listeners, meta, live}
 function peerText(content) { // user text blocks only (tool_result blocks are skipped)
   if (typeof content === 'string') return content;
@@ -884,7 +884,13 @@ function peerText(content) { // user text blocks only (tool_result blocks are sk
 function peerEntries(line, sent) { // one transcript line -> entries (no i/ts yet)
   if (typeof line !== 'string' || line.length > PEER_LINE_MAX) return [];
   let o; try { o = JSON.parse(line); } catch { return []; }
-  if (!o || typeof o !== 'object' || !o.message || o.isSidechain) return [];
+  if (!o || typeof o !== 'object' || o.isSidechain) return [];
+  if (o.type === 'system' && typeof o.content === 'string' && o.content.startsWith(PEER_HELD)) {
+    // Claude Code held a peer message (e.g. the session bypasses prompts): show it, the user must review it in the session
+    const m = /«([\s\S]*?)»/.exec(o.content);
+    return [{ kind: 'held', text: clip(m ? m[1] : '', MAX_TEXT), at: Date.parse(o.timestamp) || Date.now() }];
+  }
+  if (!o.message) return [];
   const at = Date.parse(o.timestamp) || Date.now(), out = [];
   if (o.type === 'user') {
     let text = peerText(o.message.content);

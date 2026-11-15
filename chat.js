@@ -130,6 +130,8 @@
     const peer = cur && cur.mode === 'peer';
     if (x.kind === 'user') el = h('div', { class: 'cm user' }, h('small', { text: peer ? 'You (in session)' : 'You' }), x.text);
     else if (x.kind === 'peer') el = h('div', { class: 'cm user peer' + (x.via === 'dashboard' ? '' : ' other') }, h('small', { text: x.via === 'dashboard' ? 'You (dashboard)' : 'Another session' }), x.text);
+    else if (x.kind === 'held') el = h('div', { class: 'cm user peer held' }, h('small', { text: 'Held by the session, not delivered' }), x.text,
+      h('em', { text: 'This session runs without permission prompts, so Claude Code holds messages from outside. Review it in that session, or set "crossSessionInbound" to "accept" in its settings.' }));
     else if (x.kind === 'assistant') el = h('div', { class: 'cm assistant' }, h('small', { text: 'Claude' }), x.text);
     else if (x.kind === 'tool') el = h('div', { class: 'cl tool' }, h('b', { text: '▸ ' + x.name }), x.text);
     else if (x.kind === 'request') el = h('div', { class: 'cl request' }, h('b', { text: '? ' + x.name }), x.text);

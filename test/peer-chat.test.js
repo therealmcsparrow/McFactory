@@ -177,6 +177,17 @@ test('peer via dashboard', async () => {
   assert.deepEqual(got.map(e => [e.text, e.via]), [['hello', 'dashboard'], ['from elsewhere', 'session']]);
 });
 
+const heldLine = (sid, preview, n) => ({ type: 'system', subtype: 'informational', level: 'warning', sessionId: sid, timestamp: ts(), isMeta: false,
+  content: 'Held peer message — from an unidentified session; preview: «' + preview + '» — not delivered to Claude (' + n + ' held). The sender did not attest its permission mode and this session bypasses prompts. Review it below, or set "crossSessionInbound" to "accept".' });
+
+test('held peer message is shown as held', async () => {
+  const sid = crypto.randomUUID();
+  h.transcript(sid, [uLine(sid, 'start'), heldLine(sid, 'hello there', 1),
+    { type: 'system', subtype: 'informational', level: 'info', sessionId: sid, timestamp: ts(), content: 'Some other notice' }]);
+  const s = await h.peerStream(sid); const init = await initOf(s); s.close();
+  assert.deepEqual(init.log.map(e => [e.kind, e.text]), [['user', 'start'], ['held', 'hello there']]);
+});
+
 test('init cap', async () => {
   const sid = crypto.randomUUID();
   h.transcript(sid, Array.from({ length: 250 }, (_, i) => uLine(sid, 'line ' + (i + 1))));
