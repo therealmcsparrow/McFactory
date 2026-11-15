@@ -63,6 +63,31 @@ class Harness {
       r.on('error', reject); if (data) r.write(data); r.end();
     });
   }
+  // SSE client: events = [{event, data}] in arrival order; status = HTTP status
+  stream(p) {
+    return new Promise((resolve, reject) => {
+      const s = { events: [], status: 0, body: '' };
+      const r = http.get({ host: '127.0.0.1', port: this.port, path: p }, res => {
+        s.status = res.statusCode; res.setEncoding('utf8'); let buf = '';
+        res.on('data', d => {
+          if (res.statusCode !== 200) { s.body += d; return; }
+          buf += d; let i;
+          while ((i = buf.indexOf('\n\n')) >= 0) {
+            const block = buf.slice(0, i); buf = buf.slice(i + 2);
+            let ev = 'message', data = '';
+            for (const l of block.split('\n')) { if (l.startsWith('event: ')) ev = l.slice(7); else if (l.startsWith('data: ')) data += l.slice(6); }
+            if (data) { this.bodies.push(data); s.events.push({ event: ev, data: JSON.parse(data) }); }
+          }
+        });
+        res.on('end', () => { if (s.body) this.bodies.push(s.body); });
+        resolve(s);
+      });
+      r.on('error', reject);
+      s.close = () => r.destroy();
+      s.of = ev => s.events.filter(e => e.event === ev).map(e => e.data);
+    });
+  }
+  peerStream(sid, token = this.token) { return this.stream('/api/peer/' + sid + '/stream' + (token ? '?token=' + token : '')); }
   send(sid, body, headers) { return this.req('POST', '/api/peer/' + sid + '/send', { headers: Object.assign({ 'x-chat-token': this.token }, headers || {}), body }); }
   async state() { const r = await this.req('GET', '/api/state?hours=24'); return r.json; }
   async task(sid) { const s = await this.state(); for (const p of s.projects) for (const t of p.tasks) if (t.id === sid) return t; return null; }

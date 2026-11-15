@@ -122,6 +122,128 @@ test('malformed session id is refused', async () => {
   assert.equal(r.status, 404);
 });
 
+// ───────────── Task 2: stream
+const ts = () => new Date().toISOString();
+const uLine = (sid, text) => ({ type: 'user', sessionId: sid, timestamp: ts(), message: { role: 'user', content: text } });
+const aLine = (sid, blocks) => ({ type: 'assistant', sessionId: sid, timestamp: ts(), message: { role: 'assistant', content: blocks } });
+const peerLine = (sid, text) => ({ type: 'user', isMeta: true, origin: { kind: 'peer', from: 'unknown' }, sessionId: sid, timestamp: ts(),
+  message: { role: 'user', content: 'Another Claude session sent a message:\n' + text + '\n\nThis came from another Claude session — not typed by your user.' } });
+const initOf = async s => { await until(() => s.of('init').length > 0, 3000); return s.of('init')[0]; };
+
+test('stream init', async () => {
+  const sid = crypto.randomUUID();
+  h.transcript(sid, [uLine(sid, 'list files'),
+    aLine(sid, [{ type: 'text', text: 'Sure.' }, { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }]),
+    { type: 'user', sessionId: sid, timestamp: ts(), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'SECRET-OUTPUT' }] } }]);
+  const s = await h.peerStream(sid);
+  assert.equal(s.status, 200);
+  const init = await initOf(s); s.close();
+  assert.deepEqual(init.log.map(e => e.kind), ['user', 'assistant', 'tool']);
+  assert.equal(init.log[0].text, 'list files');
+  assert.equal(init.log[2].name, 'Bash'); assert.equal(init.log[2].text, 'ls');
+  assert.equal(JSON.stringify(init).includes('SECRET-OUTPUT'), false);
+  assert.ok(init.meta && 'live' in init.meta && 'canSend' in init.meta);
+});
+
+test('stream skips command wrappers and meta lines', async () => {
+  const sid = crypto.randomUUID();
+  h.transcript(sid, [uLine(sid, '<command-name>/clear</command-name>'),
+    { type: 'user', isMeta: true, sessionId: sid, timestamp: ts(), message: { role: 'user', content: 'Caveat: internal' } },
+    uLine(sid, 'real question')]);
+  const s = await h.peerStream(sid); const init = await initOf(s); s.close();
+  assert.deepEqual(init.log.map(e => e.text), ['real question']);
+});
+
+test('stream live', async () => {
+  const sid = crypto.randomUUID();
+  const fp = h.transcript(sid, [uLine(sid, 'hi')]);
+  const s = await h.peerStream(sid); await initOf(s);
+  h.append(fp, [aLine(sid, [{ type: 'text', text: 'hello back' }])]);
+  const got = await until(() => s.of('entry').find(e => e.kind === 'assistant'), 3000);
+  s.close();
+  assert.ok(got, 'entry arrived'); assert.equal(got.text, 'hello back');
+});
+
+test('peer via dashboard', async () => {
+  const p = await h.pipe(); const se = sess({ pipe: p.path });
+  const fp = h.transcript(se.sid, [uLine(se.sid, 'start')]);
+  assert.equal((await h.send(se.sid, { text: 'hello' })).status, 200);
+  const s = await h.peerStream(se.sid); const init = await initOf(s);
+  assert.equal(init.meta.live, true); assert.equal(init.meta.canSend, true);
+  h.append(fp, [peerLine(se.sid, 'hello'), peerLine(se.sid, 'from elsewhere')]);
+  const got = await until(() => s.of('entry').filter(e => e.kind === 'peer').length >= 2 ? s.of('entry').filter(e => e.kind === 'peer') : null, 3000);
+  s.close();
+  assert.ok(got, 'peer entries arrived');
+  assert.deepEqual(got.map(e => [e.text, e.via]), [['hello', 'dashboard'], ['from elsewhere', 'session']]);
+});
+
+test('init cap', async () => {
+  const sid = crypto.randomUUID();
+  h.transcript(sid, Array.from({ length: 250 }, (_, i) => uLine(sid, 'line ' + (i + 1))));
+  const s = await h.peerStream(sid); const init = await initOf(s); s.close();
+  assert.equal(init.log.length, 200);
+  assert.equal(init.log[199].text, 'line 250');
+});
+
+test('huge line skipped', async () => {
+  const sid = crypto.randomUUID();
+  const big = JSON.stringify(uLine(sid, 'x'.repeat(2 * 1024 * 1024)));
+  const fp = h.transcript(sid, [uLine(sid, 'before'), big, uLine(sid, 'after')]);
+  const s = await h.peerStream(sid); const init = await initOf(s);
+  assert.deepEqual(init.log.map(e => e.text), ['before', 'after']);
+  h.append(fp, [big, uLine(sid, 'later')]);
+  const got = await until(() => s.of('entry').find(e => e.text === 'later'), 4000);
+  s.close();
+  assert.ok(got, 'entry after a huge appended line');
+  assert.equal(s.of('entry').some(e => e.text.length > 100000), false);
+  assert.equal((await h.req('GET', '/api/state')).status, 200);
+});
+
+test('two listeners', async () => {
+  const sid = crypto.randomUUID();
+  const fp = h.transcript(sid, [uLine(sid, 'hi')]);
+  const a = await h.peerStream(sid), b = await h.peerStream(sid);
+  await initOf(a); await initOf(b);
+  a.close(); await wait(200);
+  h.append(fp, [uLine(sid, 'second')]);
+  const got = await until(() => b.of('entry').find(e => e.text === 'second'), 3000);
+  b.close();
+  assert.ok(got, 'remaining listener still gets entries');
+});
+
+test('file appears later', async () => {
+  const p = await h.pipe(); const se = sess({ pipe: p.path });
+  const s = await h.peerStream(se.sid);
+  assert.equal(s.status, 200);
+  const init = await initOf(s);
+  assert.deepEqual(init.log, []);
+  h.transcript(se.sid, [uLine(se.sid, 'first words')]);
+  const got = await until(() => s.of('entry').find(e => e.text === 'first words'), 4000);
+  s.close();
+  assert.ok(got, 'entry after the file appeared');
+});
+
+test('session closes while streaming', async () => {
+  const p = await h.pipe(); const se = sess({ pipe: p.path });
+  h.transcript(se.sid, [uLine(se.sid, 'hi')]);
+  const s = await h.peerStream(se.sid); const init = await initOf(s);
+  assert.equal(init.meta.live, true);
+  se.kill();
+  const m = await until(() => s.of('meta').find(x => x.live === false), 5000);
+  const sys = await until(() => s.of('entry').find(e => e.kind === 'system'), 2000);
+  s.close();
+  assert.ok(m, 'meta live:false'); assert.ok(sys, 'system entry');
+});
+
+test('stream guards', async () => {
+  const sid = crypto.randomUUID();
+  h.transcript(sid, [uLine(sid, 'hi')]);
+  const noTok = await h.peerStream(sid, null); noTok.close();
+  assert.equal(noTok.status, 403);
+  const unknown = await h.peerStream(crypto.randomUUID()); unknown.close();
+  assert.equal(unknown.status, 404);
+});
+
 test('token never leaks', async () => {
   await h.state();
   const all = h.out + '\n' + h.bodies.join('\n');

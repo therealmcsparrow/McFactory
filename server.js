@@ -866,11 +866,109 @@ function peerSeen(sid, pid, status) { // from readLive: a session that changed s
   const s = peerState.get(sid); if (!s) return;
   const k = pid + ':' + status; if (s.seen !== k) { s.seen = k; if (!s.canSend) { s.canSend = true; version++; } }
 }
+// conversation stream: one tail per session while at least one chat panel listens; read from the transcript.
+// Only user text, peer messages, assistant text and tool name + short summary. No tool input beyond that, no tool output.
+const PEER_LOG = 200, PEER_LINE_MAX = 1 << 20, PEER_INIT_BYTES = 16 << 20, PEER_CHUNK = 8 << 20;
+const PEER_HEAD = 'Another Claude session sent a message:\n', PEER_TAIL = '\n\nThis came from another Claude session';
+const peerTails = new Map(); // sessionId -> {sid, fp, offset, carry, skip, log, seq, listeners, meta, live}
+function peerText(content) { // user text blocks only (tool_result blocks are skipped)
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.filter(b => b && b.type === 'text' && typeof b.text === 'string').map(b => b.text).join('\n');
+}
+function peerEntries(line, sent) { // one transcript line -> entries (no i/ts yet)
+  if (typeof line !== 'string' || line.length > PEER_LINE_MAX) return [];
+  let o; try { o = JSON.parse(line); } catch { return []; }
+  if (!o || typeof o !== 'object' || !o.message || o.isSidechain) return [];
+  const at = Date.parse(o.timestamp) || Date.now(), out = [];
+  if (o.type === 'user') {
+    let text = peerText(o.message.content);
+    if (o.isMeta) {
+      if (!o.origin || o.origin.kind !== 'peer' || !text) return [];
+      if (text.startsWith(PEER_HEAD)) { text = text.slice(PEER_HEAD.length); const k = text.lastIndexOf(PEER_TAIL); if (k >= 0) text = text.slice(0, k); }
+      const mine = Array.isArray(sent) && sent.some(s => s === text || s.trim() === text.trim());
+      out.push({ kind: 'peer', via: mine ? 'dashboard' : 'session', text: clip(text, MAX_TEXT), at });
+    } else if (text.trim() && !text.trimStart().startsWith('<') && !o.isCompactSummary) out.push({ kind: 'user', text: clip(text, MAX_TEXT), at });
+  } else if (o.type === 'assistant' && Array.isArray(o.message.content)) {
+    for (const b of o.message.content) {
+      if (!b) continue;
+      if (b.type === 'text' && typeof b.text === 'string' && b.text.trim()) out.push({ kind: 'assistant', text: clip(b.text, MAX_TEXT), at });
+      else if (b.type === 'tool_use') out.push({ kind: 'tool', name: clip(b.name, 60), text: toolSummary(b.name, b.input), at });
+    }
+  }
+  return out;
+}
+function peerFile(sid) { // the session's main transcript: tracked file first, else ROOT/*/<sid>.jsonl
+  for (const f of files.values()) if (f.kind === 'main' && f.agent.sessionId === sid) return f.path;
+  let ds; try { ds = fs.readdirSync(ROOT, { withFileTypes: true }); } catch { return null; }
+  for (const d of ds) { if (!d.isDirectory()) continue; const fp = path.join(ROOT, d.name, sid + '.jsonl'); try { if (fs.statSync(fp).isFile()) return fp; } catch { } }
+  return null;
+}
+function tailRead(t) { // new complete lines since t.offset -> entries; lines over PEER_LINE_MAX are skipped unparsed
+  let st; try { st = fs.statSync(t.fp); } catch { return []; }
+  if (st.size < t.offset) { t.offset = 0; t.carry = null; t.skip = false; } // replaced or truncated
+  if (st.size === t.offset) return [];
+  const len = Math.min(st.size - t.offset, PEER_CHUNK), buf = Buffer.alloc(len);
+  let fd = null; try { fd = fs.openSync(t.fp, 'r'); fs.readSync(fd, buf, 0, len, t.offset); } catch { return []; } finally { if (fd !== null) try { fs.closeSync(fd); } catch { } }
+  t.offset += len;
+  const out = [], sent = (peerState.get(t.sid) || {}).sentTexts;
+  let start = 0, nl;
+  while ((nl = buf.indexOf(10, start)) !== -1) {
+    const part = buf.subarray(start, nl); start = nl + 1;
+    if (t.skip) { t.skip = false; t.carry = null; continue; }
+    const line = t.carry ? Buffer.concat([t.carry, part]) : part; t.carry = null;
+    if (line.length <= PEER_LINE_MAX) for (const e of peerEntries(line.toString('utf8'), sent)) out.push(e);
+  }
+  if (start < buf.length && !t.skip) {
+    const rest = t.carry ? Buffer.concat([t.carry, buf.subarray(start)]) : Buffer.from(buf.subarray(start));
+    if (rest.length > PEER_LINE_MAX) { t.skip = true; t.carry = null; } else t.carry = rest;
+  }
+  return out;
+}
+function tailAdd(t, e) { e.i = ++t.seq; e.ts = e.at; delete e.at; t.log.push(e); if (t.log.length > PEER_LOG) t.log.shift(); return e; }
+function tailMeta(t) {
+  const target = peerTarget(t.sid), ps = peerState.get(t.sid), lv = live && live.get(t.sid);
+  return { live: !!target || procs.has(t.sid), canSend: !!target && (ps ? ps.canSend : true), status: lv ? lv.status : target ? target.status : '', entrypoint: target ? target.entrypoint : '' };
+}
+function tailOpen(sid) {
+  const t = { sid, fp: peerFile(sid), offset: 0, carry: null, skip: false, log: [], seq: 0, listeners: new Set(), meta: null, live: false };
+  if (t.fp) {
+    try { const size = fs.statSync(t.fp).size; if (size > PEER_INIT_BYTES) { t.offset = size - PEER_INIT_BYTES; t.skip = true; } } catch { }
+    for (let n = 0; n < 8; n++) { const es = tailRead(t); for (const e of es) tailAdd(t, e); if (!es.length && !t.carry) break; }
+  }
+  t.meta = tailMeta(t); t.live = t.meta.live;
+  peerTails.set(sid, t); return t;
+}
+function peerTick() { // every second: new transcript lines and state changes to the open panels
+  for (const t of peerTails.values()) {
+    if (!t.fp) t.fp = peerFile(t.sid);
+    if (t.fp) for (const e of tailRead(t)) { tailAdd(t, e); for (const r of t.listeners) sse(r, 'entry', e); }
+    const m = tailMeta(t);
+    if (JSON.stringify(m) !== JSON.stringify(t.meta)) {
+      t.meta = m; for (const r of t.listeners) sse(r, 'meta', m);
+      if (t.live && !m.live) { const e = tailAdd(t, { kind: 'system', text: 'Session closed', at: Date.now() }); for (const r of t.listeners) sse(r, 'entry', e); }
+      t.live = m.live;
+    }
+  }
+}
 async function peerRoute(req, res, u) {
   try {
-    const m = /^\/api\/peer\/([\w-]{1,64})\/send$/.exec(u.pathname);
+    const m = /^\/api\/peer\/([\w-]{1,64})\/(send|stream)$/.exec(u.pathname);
     if (!m) return sendJson(res, 404, { error: 'not found' });
     const sid = m[1];
+    if (m[2] === 'stream') {
+      if (req.method !== 'GET') return sendJson(res, 405, { error: 'GET only' });
+      if (!tokenOk(u.searchParams.get('token'))) return sendJson(res, 403, { error: 'bad token' });
+      if (chats.has(sid)) return sendJson(res, 404, { error: 'owned session: use /api/chat' });
+      let t = peerTails.get(sid);
+      if (!t && !peerTarget(sid) && !peerFile(sid)) return sendJson(res, 404, { error: 'no terminal or desktop session with this id' });
+      if (!t) t = tailOpen(sid);
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' });
+      res.write('retry: 2000\n\n'); sse(res, 'init', { meta: t.meta, log: t.log });
+      t.listeners.add(res);
+      req.on('close', () => { t.listeners.delete(res); if (!t.listeners.size && peerTails.get(sid) === t) peerTails.delete(sid); });
+      return;
+    }
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
     if (!tokenOk(req.headers['x-chat-token'])) return sendJson(res, 403, { error: 'bad token' });
     const body = await readJson(req) || {};
@@ -939,8 +1037,9 @@ const t0 = Date.now(); while (dirtyFiles.size && Date.now() - t0 < 1500) pump();
 let beat = 0;
 setInterval(() => {
   pump();
+  peerTick();
   for (const c of clients) { try { push(c); } catch { clients.delete(c); } }
-  if (++beat % 15 === 0) { for (const c of clients) c.res.write(': ping\n\n'); for (const ch of chats.values()) for (const r of ch.listeners) try { r.write(': ping\n\n'); } catch { } }
+  if (++beat % 15 === 0) { for (const c of clients) c.res.write(': ping\n\n'); for (const ch of [...chats.values(), ...peerTails.values()]) for (const r of ch.listeners) try { r.write(': ping\n\n'); } catch { } }
 }, 1000);
 
 server.listen(PORT, '127.0.0.1', () => {
