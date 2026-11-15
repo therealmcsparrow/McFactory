@@ -4,6 +4,8 @@ All notable changes to this project are listed here.
 
 ## Unreleased
 
+## 0.1.0 - 2026-11-15
+
 ### Added
 
 -   The live factory view, chat with dashboard sessions, the global permission hook and the desktop app.
