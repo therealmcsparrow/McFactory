@@ -7,11 +7,16 @@
 //   /api/stream?hours= SSE, pushes a snapshot when it changes (checked every ~1s)
 //   /api/chat/*        chat with sessions THIS server started (see "owned chat sessions")
 //   /hook/permission, /hook/pretool, /api/ext/*   answer terminal/desktop prompts through global http hooks (see "external prompts")
+//   /api/peer/*        chat with terminal/desktop sessions over their local messaging pipe (see "peer chat")
+//   /api/refresh       POST, chat token: rescan sessions and transcripts now and re-push every stream
 //   --install-hook [--with-ask] / --uninstall-hook [--settings <file>]   merge/remove only our entries in ~/.claude/settings.json
 // PRIVACY: for every session the dashboard did not start, only the session title (first prompt, 60 chars)
 // and subagent descriptions leave this process. No message text, tool inputs or tool outputs.
 // Dashboard-owned sessions (started via POST /api/chat/start) additionally stream their own chat log
 // (user/assistant text, tool names + short summary, results, cost) to this page.
+// Message text of terminal and desktop sessions is only sent to the local dashboard page that holds this run's
+// chat token, and only while that session's chat panel is open. It never appears in /api/state, and nothing
+// leaves the machine. The session's peer token (from its key file) is only ever written to its own pipe.
 'use strict';
 const fs = require('fs');
 const path = require('path');

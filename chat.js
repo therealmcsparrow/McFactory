@@ -109,7 +109,11 @@
     const es = c.es = new EventSource(`/api/${peer ? 'peer' : 'chat'}/${encodeURIComponent(id)}/stream?token=${encodeURIComponent(TOKEN)}`);
     es.addEventListener('init', e => { if (cur !== c) return; const d = JSON.parse(e.data); logEl.replaceChildren(); c.last = 0; for (const x of d.log) addLog(x); c.meta = d.meta; c.pendKey = ''; paint(); scrollDown(true); maybeFocus(); });
     es.addEventListener('entry', e => { if (cur !== c) return; addLog(JSON.parse(e.data)); });
-    es.addEventListener('meta', e => { if (cur !== c) return; c.meta = JSON.parse(e.data); paint(); maybeFocus(); });
+    es.addEventListener('meta', e => {
+      if (cur !== c) return; const m = JSON.parse(e.data);
+      if (peer && c.meta && c.meta.canSend === false && m.canSend === true) c.ro = ''; // the server unlocked it (status or process changed)
+      c.meta = m; paint(); maybeFocus();
+    });
     es.onerror = () => { if (cur === c && es.readyState === 2) { errEl.textContent = peer ? 'Chat stream closed.' : 'Chat stream closed. This session is no longer tracked by the dashboard.'; } };
   }
   const reopen = () => { if (cur) { const { id, mode } = cur; closeStream(); showFor(id, mode); } };
