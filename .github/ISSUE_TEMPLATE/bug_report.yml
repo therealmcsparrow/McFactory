@@ -1,0 +1,62 @@
+name: Bug report
+description: Something in Crate Works Live does not work as described.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Anything you post here is public: leave out session text, folder names, tokens and anything else you would not share. Security problems go through **Security > Report a vulnerability**, not here.
+  - type: dropdown
+    id: how
+    attributes:
+      label: How do you run it?
+      options:
+        - node server.js
+        - Desktop app
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The commit (`git rev-parse --short HEAD`) or the desktop app version.
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Node, Claude Code, OS and browser
+      placeholder: "Node 24.3, Claude Code 2.4.1, Windows 11, Chrome 142"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start the server with ...
+        2. Open ...
+        3. Click ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server output or browser console errors
+      description: Remove anything private first.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I tried the latest version of `main` or the latest release.
+          required: true
+        - label: I removed private details (session text, paths, tokens) from this report.
+          required: true
