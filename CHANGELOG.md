@@ -4,6 +4,8 @@ All notable changes to this project are listed here.
 
 ## Unreleased
 
+## 0.1.1 - 2026-11-15
+
 ### Fixed
 
 -   The installer's name in a release has no spaces, so `sha256sum -c SHA256SUMS.txt` finds the downloaded file.
