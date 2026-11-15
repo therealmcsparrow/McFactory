@@ -48,7 +48,7 @@ When a session closes, its line retires: the arms fold, crates already on the be
 
 A subagent that is done or failed loses its arm. If it holds a crate, it puts it on the belt first; then the arm folds and sinks into the floor (about 1.6 seconds, instant with reduced motion) and the other arms slide together.
 
-The main arm stays while the session is open. Arms are ordered main first, then subagents by start time.
+A new arm only appears on an empty spot: while a removal crew still holds the line, or another arm still stands where it goes, it waits and then grows in. The main arm stays while the session is open. Arms are ordered main first, then subagents by start time.
 
 Each open line has a small "N finished" sign under its line sign, with one role-coloured chip per finished agent (newest first, at most 12). Hover or focus it to see the rows: role, model, tokens, done or failed, duration. Click a row for the agent card.
 

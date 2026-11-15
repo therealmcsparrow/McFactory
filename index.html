@@ -856,7 +856,7 @@ function buildScene(ctx) {
   const DOCKCAP = 24, FW = 17, HX = FW / 2, BX0 = -7.4, BX1 = HX + .45, BY = .62, ARMS = 10, ARMDZ = -1.3, PITCH = 3.2, MAXL = 6, MAXF = 12;
   const XC = HX + .85, XD = HX + 1.95, XP = HX + 3.2;         // cross conveyor, dock rack, robot pick spot
   const CW = 25, CD = 27, OX1 = 23.1, RZ = 13.5, WHX = 7, WHZ = 9, BAYZ = 11.4, NB = 12, CARRY = 3, CRATE_TOK = 20000;
-  const armX = i => -6.2 + i * 1.45; // slot pitch: with the swing tuck (ARM_XL) neighbouring arms never touch, even at max scale
+  const ARM_PITCH = 1.45, armX = i => -6.2 + i * ARM_PITCH; // slot pitch: with the swing tuck (ARM_XL) neighbouring arms never touch, even at max scale
   const rowZ = (r, n) => (r - (n - 1) / 2) * PITCH + 1.0;
   const SD = 2.4; // sign strip along the far wall (closed-session info board); rows shift toward the near side
   const lineZ = (f, r, n) => rowZ(r, n) + f.d * SD / 2;
@@ -1371,7 +1371,7 @@ function buildScene(ctx) {
     const hit = new THREE.Mesh(armHitG, invisM); root.add(hit); ctx.addPickable(hit, { kind: 'agent', id: a.id });
     const A = { a, line: l, si, ax: armX(si), ii, root, sc, turn, sh, el, wr, f1, f2, held, beacon, gauge, gfill, gauge01: 0, hit, heldVis: false, key: '',
       roleC: new THREE.Color(), modelC: new THREE.Color(), effC: new THREE.Color(), effGlow: 0,
-      ph: hashf(a.id, 7), yaw: Math.PI / 2, r: .35, h: 1.1, grip: .1, credit: 0, cycling: false, u: 0, dropped: false, born: animate ? 0 : 1, scale: animate ? .001 : scaleOf(a.tokens), dying: 0, flash: 0, flashCol: new THREE.Color(), sag: 0 };
+      ph: hashf(a.id, 7), yaw: Math.PI / 2, r: .35, h: 1.1, grip: .1, credit: 0, cycling: false, u: 0, dropped: false, born: animate ? 0 : 1, wait: !!animate, scale: animate ? .001 : scaleOf(a.tokens), dying: 0, flash: 0, flashCol: new THREE.Color(), sag: 0 };
     paintArm(A); l.slots[si] = a.id; arms.set(a.id, A); return A;
   }
   function paintArm(A) {
@@ -1382,6 +1382,11 @@ function buildScene(ctx) {
   }
   function reslot(l) { // compact a line's arms after one retires: main first, then by start time; arms slide (eased in animArm)
     const list = [...arms.values()].filter(A => A.line === l).sort((x, y) => armOrder(x.a, y.a)); l.slots.fill(null); list.forEach((A, i) => { A.si = i; l.slots[i] = A.a.id; });
+  }
+  function spotFree(A) { // a new arm only appears where no other arm (live or being removed) stands: neighbours at their slots are ARM_PITCH away
+    for (const O of arms.values()) if (O !== A && O.line === A.line && Math.abs(O.ax - A.ax) < ARM_PITCH * .9) return false;
+    for (const O of dyingArms) if (O.line === A.line && Math.abs(O.ax - A.ax) < ARM_PITCH * .9) return false;
+    return true;
   }
   function startDying(A, retire) { A.retire = !!retire && !reduced; A.fin = !!retire; A.leaving = false; if (arms.get(A.a.id) === A) arms.delete(A.a.id); if (A.si >= 0 && A.line.slots[A.si] === A.a.id) A.line.slots[A.si] = null; A.si = -1; A.dying = 1e-4; ctx.removePickable(A.hit); dyingArms.add(A);
     if (A.retire) { (A.line.hold || (A.line.hold = new Set())).add(A); crewJobs.add(A); } } // the line's other arms keep their places until the crew has cleared this slot
@@ -1533,6 +1538,9 @@ function buildScene(ctx) {
       for (const A of out) { W(f, A.ax, 0, l.z + ARMDZ, A.root.position); A.root.rotation.y = f.rot; }
       for (const i of idx) if (out[i]) startDying(out[i], true); reslot(l);
       return { hall: f.id, line: l.id, fakes: out.map(A => A.a.id), ret: idx.map(i => out[i] && out[i].a.id) }; },
+    spawn() { const f = facs.get(focusF); const l = f && f.lines.find(l => l.hold && l.hold.size); if (!l) return null; const si = l.slots.indexOf(null); if (si < 0) return null;
+      const tpl = [...arms.values()].find(A => A.line === l); const A = tpl && makeArm(Object.assign({}, tpl.a, { id: 'crewtest-new-' + Date.now(), kind: 'sub', status: 'running', rate: 0, needsHuman: false }), l, si, true); return A ? A.a.id : null; },
+    near(id) { const A = arms.get(id); if (!A) return null; let d = 99; for (const O of [...arms.values(), ...dyingArms]) if (O !== A && O.line === A.line) d = Math.min(d, Math.abs(O.ax - A.ax)); return { born: +A.born.toFixed(2), wait: A.wait, d: +d.toFixed(2) }; },
     speed(k) { crewTS = k; },
     info() { return { crews: crews.length, workers: crews.reduce((n, c) => n + c.ws.length, 0), jobs: crewJobs.size, dying: dyingArms.size, ph: crews.map(c => c.ph + ':' + c.ws.map(w => w.st).join(',')),
       holds: [...lineIdx.values()].reduce((n, l) => n + (l.hold ? l.hold.size : 0), 0), wpos: crews.flatMap(c => c.ws.map(w => W(c.f, w.x, 0, w.z).toArray().map(v => +v.toFixed(2)))), arms: [...arms.values()].filter(A => A.a.id.startsWith('crewtest')).map(A => ({ id: A.a.id, si: A.si, ax: +A.ax.toFixed(2) })) }; },
@@ -1566,8 +1574,10 @@ function buildScene(ctx) {
   function animArm(A, dt, t) {
     const a = A.a, st = a.status, l = A.line, f = l.f;
     if (A.si >= 0 && !(l.hold && l.hold.size)) A.ax = reduced ? armX(A.si) : damp(A.ax, armX(A.si), 4, dt); // re-slot waits for the removal crew
-    W(f, A.ax, 0, l.z + ARMDZ, A.root.position); A.root.rotation.y = f.rot; A.hit.visible = f.det;
-    if (A.born < 1) A.born = Math.min(1, A.born + dt / (reduced ? .01 : 1));
+    W(f, A.ax, 0, l.z + ARMDZ, A.root.position); A.root.rotation.y = f.rot;
+    if (A.wait && spotFree(A)) A.wait = false; // a new arm waits, unseen and idle, until its spot is empty
+    A.hit.visible = f.det && !A.wait; // no click target on an arm that is not there yet
+    if (A.born < 1 && !A.wait) A.born = Math.min(1, A.born + dt / (reduced ? .01 : 1));
     A.scale = damp(A.scale, scaleOf(a.tokens) * easeOut(A.born), 3, dt); A.sc.scale.setScalar(Math.max(.001, A.scale));
     const s = A.scale || 1;
     let yaw, r, h, grip = .1, rate = 4;
@@ -1577,7 +1587,7 @@ function buildScene(ctx) {
     const P = 3.4 / (modelOf(a.model).speed || 1);
     if (st === 'running' && a.rate > 0 && Date.now() - a.lastActivity < 60e3) A.credit = Math.min(4, A.credit + dt * clamp(a.rate / CRATE_TOK, 1 / 8, 1 / P));
     // backpressure: a hall whose belts + dock already hold DOCKCAP crates waits for the robots
-    if (!A.cycling && isLive(a) && A.credit >= 1 && f.backlog < DOCKCAP) { f.backlog++; A.cycling = true; A.u = 0; A.credit -= 1; A.dropped = false; }
+    if (!A.wait && !A.cycling && isLive(a) && A.credit >= 1 && f.backlog < DOCKCAP) { f.backlog++; A.cycling = true; A.u = 0; A.credit -= 1; A.dropped = false; }
     if (A.cycling && A.dropped && (st === 'failed' || st === 'done')) A.cycling = false; // a finished arm still puts its held crate on the belt
     if (A.cycling) {
       const u = A.u = Math.min(1, A.u + dt / P);
