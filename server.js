@@ -610,11 +610,13 @@ function usage(days) {
   const now = Date.now(), since = now - days * 24 * HOUR;
   if (since < loadedSince) { loadedSince = since; rescanAt = 0; pump(); }
   const buckets = new Map(); // hour start -> {label: [tokens, output, cost]}
+  const models = {};         // label -> {family, version} so the page colors a model the way the board does
   for (const a of agents.values()) for (const m of a.msgs.values()) {
     if (!(m.ts >= since)) continue;
     const t = Math.floor(m.ts / HOUR) * HOUR;
     let b = buckets.get(t); if (!b) buckets.set(t, b = {});
     const info = modelInfo(m.model), p = info.price;
+    if (!models[info.label]) models[info.label] = { family: info.family, version: info.version };
     const x = b[info.label] || (b[info.label] = [0, 0, 0]);
     x[0] += m.in + m.out + m.cw + m.cr; x[1] += m.out;
     if (p) x[2] += (m.in * p.inP + m.out * p.outP + m.cw * p.cwP + m.cr * p.crP) / 1e6;
@@ -623,7 +625,7 @@ function usage(days) {
     for (const k of Object.keys(m)) m[k][2] = Math.round(m[k][2] * 1e6) / 1e6;
     return { t, m };
   });
-  return { now, days, since, bucketMs: HOUR, loading: pendingBytes > 0, hours, limits: readLimits(), history: readLimitsHist(since), statusline: slState() };
+  return { now, days, since, bucketMs: HOUR, loading: pendingBytes > 0, hours, models, limits: readLimits(), history: readLimitsHist(since), statusline: slState() };
 }
 
 // ───────────── owned chat sessions
@@ -1170,7 +1172,7 @@ async function peerRoute(req, res, u) {
 
 // ───────────── http
 const MIME ={ '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.md': 'text/plain; charset=utf-8' };
-const STATIC = new Set(['index.html', 'live-data.js', 'chat.js', 'chat.css']);
+const STATIC = new Set(['index.html', 'live-data.js', 'chat.js', 'chat.css', 'usage.js']);
 const clients = new Set();
 const server = http.createServer((req, res) => {
   if (!hostOk(req) || !originOk(req)) { res.writeHead(403, { 'content-type': 'text/plain' }); res.end('forbidden'); return; }

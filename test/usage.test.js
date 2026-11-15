@@ -34,6 +34,7 @@ test('usage buckets tokens and cost per hour and model', async () => {
     assert.ok(opus && haiku, JSON.stringify(all));
     assert.equal(opus[2][0], 10000); assert.equal(opus[2][1], 2000); assert.ok(opus[2][2] > 0);
     assert.equal(haiku[2][0], 1000);
+    assert.deepEqual(r.json.models['Opus 5.5'], { family: 'opus', version: '5.5' });
     assert.ok(opus[1] <= now - 2 * HOUR && opus[1] > now - 3 * HOUR);
     assert.equal(r.body.includes('SECRET-TEXT'), false);
   } finally { await h.stop(); }
