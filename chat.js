@@ -80,7 +80,37 @@
   const errEl = h('div', { class: 'chat-err', role: 'alert' });
   const input = h('textarea', { rows: 1, 'aria-label': 'Message to the session', placeholder: 'Message, Enter to send, Shift+Enter for a new line', spellcheck: 'false' });
   const sendBtn = h('button', { class: 'cb-btn pri', type: 'button', text: 'Send', onclick: () => send() });
-  const form = h('div', { class: 'chat-in' }, input, sendBtn);
+  // slash command list: shown while the message is a lone "/word"; a combobox over the textarea
+  const cmdList = h('ul', { id: 'chat-cmds', class: 'chat-cmds', role: 'listbox', 'aria-label': 'Slash commands', hidden: true });
+  const cmdNote = h('div', { class: 'chat-cmds-note', hidden: true });
+  input.setAttribute('role', 'combobox'); input.setAttribute('aria-autocomplete', 'list'); input.setAttribute('aria-controls', 'chat-cmds'); input.setAttribute('aria-expanded', 'false');
+  let cmdSel = -1;
+  function cmdItems() { return [...cmdList.children]; }
+  function cmdMark(i) {
+    const it = cmdItems(); if (!it.length) return;
+    cmdSel = (i + it.length) % it.length;
+    it.forEach((li, k) => li.setAttribute('aria-selected', String(k === cmdSel)));
+    input.setAttribute('aria-activedescendant', it[cmdSel].id); it[cmdSel].scrollIntoView({ block: 'nearest' });
+  }
+  function cmdClose() { cmdList.hidden = true; cmdNote.hidden = true; cmdSel = -1; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); }
+  function cmdPick(name) { input.value = '/' + name + ' '; cmdClose(); input.focus(); input.dispatchEvent(new Event('input')); }
+  function cmdUpdate() {
+    const mt = /^\/([^\s]*)$/.exec(input.value);
+    if (!mt || !cur || input.disabled) return cmdClose();
+    const note = t => { cmdList.hidden = true; input.setAttribute('aria-expanded', 'false'); cmdNote.textContent = t; cmdNote.hidden = false; };
+    if (cur.mode === 'peer') return note('Slash commands run only inside that session. From here this is sent as a plain message.');
+    const all = cur.meta && cur.meta.commands;
+    if (!all) return note('Commands load once the session has started.');
+    const q = mt[1].toLowerCase();
+    const hits = all.filter(n => n.toLowerCase().startsWith(q)).concat(q ? all.filter(n => !n.toLowerCase().startsWith(q) && n.toLowerCase().includes(q)) : []).slice(0, 300);
+    if (!hits.length) return note('No command matches /' + mt[1] + '.');
+    cmdNote.hidden = true;
+    cmdList.replaceChildren(...hits.map((n, k) => h('li', { id: 'chat-cmd-' + k, role: 'option', 'aria-selected': 'false', text: '/' + n, onmousedown: ev => { ev.preventDefault(); cmdPick(n); } })));
+    cmdList.hidden = false; input.setAttribute('aria-expanded', 'true'); cmdMark(0);
+  }
+  input.addEventListener('input', cmdUpdate);
+  input.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== input) cmdClose(); }, 0));
+  const form = h('div', { class: 'chat-in' }, cmdList, cmdNote, input, sendBtn);
   const nowCb = h('input', { type: 'checkbox', id: 'chat-now' });
   const nowWrap = h('label', { class: 'chat-now', hidden: true }, nowCb, 'Send now (interrupts)');
   const NOTE = { owned: 'Dashboard-started session. Messages stay on this machine.', peer: 'Terminal or desktop session. Your messages arrive as from a teammate; approvals stay in the permission cards.' };
@@ -88,7 +118,12 @@
   const panel = h('section', { id: 'chat', class: 'chat', 'aria-label': 'Session chat', hidden: true }, head, logEl, pendEl, errEl, form, nowWrap, noteEl);
   detailEl?.append(panel);
   input.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
+    if (!cmdList.hidden && !e.isComposing) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); e.stopPropagation(); cmdMark(cmdSel + (e.key === 'ArrowDown' ? 1 : -1)); return; }
+      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') { const li = cmdItems()[cmdSel]; if (li) { e.preventDefault(); e.stopPropagation(); cmdPick(li.textContent.slice(1)); return; } }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cmdClose(); return; }
+    }
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); cmdClose(); send(); }
     e.stopPropagation(); // keep page shortcuts (Esc to overview etc.) from eating typing; Esc still blurs below
     if (e.key === 'Escape') { e.preventDefault(); input.blur(); }
   });
@@ -101,7 +136,7 @@
     if (!id) { panel.hidden = true; detailEl?.classList.remove('has-chat'); closeStream(); return; }
     panel.hidden = false; detailEl?.classList.add('has-chat');
     if (cur && cur.id === id && cur.mode === mode) { maybeFocus(); return; }
-    closeStream(); logEl.replaceChildren(); pendEl.replaceChildren(); errEl.textContent = '';
+    closeStream(); logEl.replaceChildren(); pendEl.replaceChildren(); errEl.textContent = ''; cmdClose();
     const peer = mode === 'peer';
     stopBtn.hidden = peer; nowWrap.hidden = !peer; nowCb.checked = false; noteEl.textContent = NOTE[mode]; headCost.textContent = '';
     input.disabled = sendBtn.disabled = true; input.placeholder = 'Message, Enter to send, Shift+Enter for a new line';
@@ -111,7 +146,7 @@
     es.addEventListener('entry', e => { if (cur !== c) return; addLog(JSON.parse(e.data)); });
     es.addEventListener('meta', e => {
       if (cur !== c) return; const m = JSON.parse(e.data);
-      c.meta = m; paint(); maybeFocus();
+      c.meta = m; paint(); maybeFocus(); if (document.activeElement === input) cmdUpdate();
     });
     es.onerror = () => { if (cur === c && es.readyState === 2) { errEl.textContent = peer ? 'Chat stream closed.' : 'Chat stream closed. This session is no longer tracked by the dashboard.'; } };
   }
@@ -281,8 +316,40 @@
   // ───────── New session dialog
   const LS = { get: k => { try { return localStorage.getItem(k) || ''; } catch { return ''; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { } } };
   const projSel = h('select', { id: 'cn-proj', 'aria-label': 'Project' });
-  const otherIn = h('input', { id: 'cn-other', type: 'text', placeholder: 'C:\\path\\to\\folder', 'aria-label': 'Folder path', autocomplete: 'off', spellcheck: 'false' });
-  const otherWrap = h('label', { hidden: true }, 'Folder path (absolute, must exist)', otherIn);
+  const pathIn = h('input', { id: 'cn-path', type: 'text', placeholder: 'C:\\path\\to\\folder', autocomplete: 'off', spellcheck: 'false' });
+  const browseBtn = h('button', { class: 'cb-btn cn-browse', type: 'button', text: 'Browse…', 'aria-expanded': 'false', 'aria-controls': 'cn-fb' });
+  const pathWrap = h('div', { class: 'cn-pathf' }, h('label', { for: 'cn-path', text: 'Folder (absolute, must exist)' }), h('div', { class: 'cn-path' }, pathIn, browseBtn));
+  // in-dialog folder browser: GET /api/fs/dirs lists subfolder names only
+  const fbCur = h('div', { class: 'cn-fb-cur', 'aria-live': 'polite' });
+  const fbUp = h('button', { class: 'cb-btn', type: 'button', text: 'Up' });
+  const fbUse = h('button', { class: 'cb-btn pri', type: 'button', text: 'Use this folder' });
+  const fbList = h('ul', { class: 'cn-fb-list', 'aria-label': 'Folders' });
+  const fbMsg = h('div', { class: 'cn-fb-msg' });
+  const fb = h('div', { id: 'cn-fb', class: 'cn-fb', hidden: true }, h('div', { class: 'cn-fb-bar' }, fbUp, fbCur, fbUse), fbList, fbMsg);
+  let fbPath = '', fbParent = '', fbSeq = 0;
+  async function fbLoad(p) {
+    const seq = ++fbSeq; fbMsg.textContent = 'Loading…';
+    let j;
+    try {
+      const r = await fetch('/api/fs/dirs' + (p ? '?path=' + encodeURIComponent(p) : ''), { headers: { 'x-chat-token': TOKEN } });
+      j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'cannot open that folder');
+    } catch (e) { if (seq !== fbSeq) return; if (p) return fbLoad(''); fbMsg.textContent = e.message; return; }
+    if (seq !== fbSeq) return;
+    fbPath = j.path || ''; fbParent = j.parent || '';
+    fbCur.textContent = fbPath || 'Choose a starting point';
+    fbUp.disabled = !fbPath; fbUse.disabled = !fbPath;
+    const items = fbPath ? j.dirs : j.roots;
+    fbList.replaceChildren(...items.map(n => h('li', null, h('button', { type: 'button', text: n, onclick: () => fbLoad(fbPath ? fbPath.replace(/[\\/]+$/, '') + (fbPath.includes('\\') ? '\\' : '/') + n : n) }))));
+    fbMsg.textContent = items.length ? '' : 'No subfolders here.';
+  }
+  function fbToggle(open) {
+    fb.hidden = !open; browseBtn.setAttribute('aria-expanded', String(open));
+    if (open) { const v = pathIn.value.trim(); fbLoad(/^([a-zA-Z]:[\\/]|\/)/.test(v) ? v : ''); }
+  }
+  browseBtn.addEventListener('click', () => fbToggle(fb.hidden));
+  fbUp.addEventListener('click', () => fbLoad(fbParent));
+  fbUse.addEventListener('click', () => { if (!fbPath) return; pathIn.value = fbPath; syncSel(); fbToggle(false); pathIn.focus(); });
   const modelSel = h('select', { id: 'cn-model', 'aria-label': 'Model' }, [['', 'Default'], ['haiku', 'Haiku'], ['sonnet', 'Sonnet'], ['opus', 'Opus']].map(([v, l]) => h('option', { value: v, text: l })));
   const effortSel = h('select', { id: 'cn-effort', 'aria-label': 'Effort' }, [['', 'Default'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'X-high'], ['max', 'Max']].map(([v, l]) => h('option', { value: v, text: l })));
   const promptIn = h('textarea', { id: 'cn-prompt', rows: 4, 'aria-label': 'First message', placeholder: 'What should Claude do?', spellcheck: 'false' });
@@ -291,7 +358,7 @@
   const cancelBtn = h('button', { class: 'cb-btn', type: 'button', text: 'Cancel' });
   const lab = (t, el) => h('label', { text: undefined }, t, el);
   const formEl = h('form', { class: 'cn-f', method: 'dialog', novalidate: true },
-    lab('Project', projSel), otherWrap,
+    lab('Project', projSel), pathWrap, fb,
     h('div', { class: 'cn-row' }, lab('Model', modelSel), lab('Effort', effortSel)),
     lab('First message', promptIn),
     h('div', { class: 'cn-hint', text: 'Claude runs in that folder with the dashboard answering permission prompts. Ctrl+Enter starts it.' }),
@@ -300,8 +367,14 @@
   document.body.append(dlg);
   cancelBtn.addEventListener('click', () => dlg.close());
   dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
-  projSel.addEventListener('change', syncOther);
-  function syncOther() { otherWrap.hidden = projSel.value !== '__other'; }
+  // the project list and the path field stay in step: picking a project fills its real folder; typing a path selects its project or "Other"
+  projSel.addEventListener('change', () => { if (projSel.value !== '__other') pathIn.value = projSel.value; else pathIn.focus(); });
+  pathIn.addEventListener('input', syncSel);
+  function syncSel() {
+    const v = pathIn.value.trim().replace(/[\\/]+$/, '').toLowerCase();
+    const hit = [...projSel.options].find(o => o.value !== '__other' && o.value.replace(/[\\/]+$/, '').toLowerCase() === v);
+    projSel.value = hit ? hit.value : '__other';
+  }
   promptIn.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); formEl.requestSubmit(); } });
   function fillProjects() {
     const seen = new Set(), opts = [];
@@ -310,7 +383,8 @@
     projSel.replaceChildren(...opts);
     const want = (lastDetail && (() => { const t = taskOfDetail(lastDetail); for (const p of DS.state.projects) if (p.tasks.some(x => x.id === t)) return p.cwd; if (lastDetail.kind === 'project') return (DS.state.projects.find(p => p.id === lastDetail.id) || {}).cwd; })()) || LS.get('chat.cwd');
     projSel.value = want && seen.has(want) ? want : opts.length > 1 ? opts[0].value : '__other';
-    syncOther();
+    pathIn.value = projSel.value === '__other' ? LS.get('chat.path') : projSel.value;
+    fbToggle(false);
   }
   function openDialog() {
     fillProjects(); modelSel.value = LS.get('chat.model'); effortSel.value = LS.get('chat.effort');
@@ -319,13 +393,13 @@
   }
   formEl.addEventListener('submit', async e => {
     e.preventDefault();
-    const cwd = projSel.value === '__other' ? otherIn.value.trim() : projSel.value, prompt = promptIn.value.trim();
-    if (!cwd) { cnErr.textContent = 'Choose a project or type a folder path.'; (projSel.value === '__other' ? otherIn : projSel).focus(); return; }
+    const cwd = pathIn.value.trim(), prompt = promptIn.value.trim();
+    if (!cwd) { cnErr.textContent = 'Choose a project, type a folder path, or browse to one.'; pathIn.focus(); return; }
     if (!prompt) { cnErr.textContent = 'Write a first message.'; promptIn.focus(); return; }
     cnErr.textContent = ''; goBtn.disabled = true; goBtn.textContent = 'Starting…';
     try {
       const r = await post('/api/chat/start', { cwd, model: modelSel.value, effort: effortSel.value, prompt });
-      LS.set('chat.cwd', projSel.value === '__other' ? '' : cwd); LS.set('chat.model', modelSel.value); LS.set('chat.effort', effortSel.value);
+      LS.set('chat.cwd', projSel.value === '__other' ? '' : cwd); LS.set('chat.path', projSel.value === '__other' ? cwd : ''); LS.set('chat.model', modelSel.value); LS.set('chat.effort', effortSel.value);
       promptIn.value = ''; dlg.close(); openSession(r.id);
     } catch (err) { cnErr.textContent = err.message; goBtn.disabled = false; goBtn.textContent = 'Start session'; }
   });
