@@ -25,6 +25,12 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--focus);outline-offs
 *{scrollbar-width:thin;scrollbar-color:oklch(36% 0.008 260) transparent}
 #tip{position:fixed;left:0;top:0;pointer-events:none;opacity:0;z-index:40;transition:opacity .12s}
 #tip.on{opacity:1}
+#rmenu{position:fixed;z-index:60;min-width:150px;padding:4px;background:var(--color-board);border-radius:4px;box-shadow:0 0 0 1px var(--color-edge),0 10px 24px -10px oklch(0% 0 0 / .8);backdrop-filter:blur(6px)}
+#rmenu[hidden]{display:none}
+#rmenu .rm-t{font:500 11px var(--font-mono);color:var(--color-ink-3);padding:4px 8px 5px}
+#rmenu button{display:block;width:100%;text-align:left;padding:6px 8px;border-radius:3px;color:var(--color-ink);font:500 13px var(--font-ui)}
+#rmenu button:hover:not(:disabled),#rmenu button:focus-visible{background:var(--color-raise)}
+#rmenu button:disabled{color:var(--color-ink-3);cursor:default}
 #tip table{border-collapse:collapse;width:100%}
 #tip td{padding:1px 0}#tip td+td{text-align:right;padding-left:14px;font-variant-numeric:tabular-nums}
 #detail[hidden]{display:none}
@@ -753,6 +759,24 @@ function startApp(buildScene, o) {
     if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return; down = null;
     const p = pickAt(); if (p) api.focus(p.kind, p.id);
   });
+  // right-click a transport robot: a small menu with "Drive" (nudges a robot out of a jam)
+  const rmenu = document.createElement('div'); rmenu.id = 'rmenu'; rmenu.setAttribute('role', 'menu'); rmenu.hidden = true; document.body.append(rmenu);
+  const closeMenu = () => { if (!rmenu.hidden) { rmenu.hidden = true; rmenu.textContent = ''; } };
+  let rdown = null; canvas.addEventListener('pointerdown', e => { if (e.button === 2) rdown = [e.clientX, e.clientY]; });
+  canvas.addEventListener('contextmenu', e => {
+    const dragged = rdown && Math.hypot(e.clientX - rdown[0], e.clientY - rdown[1]) > 5; rdown = null;
+    const r = dragged ? null : S?.robotAt?.(e.clientX, e.clientY); if (!r) { closeMenu(); return; } e.preventDefault(); down = null;
+    rmenu.textContent = ''; const t = document.createElement('div'); t.className = 'rm-t'; t.textContent = 'Transport robot ' + r.id; rmenu.append(t);
+    const b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'menuitem'); b.textContent = 'Drive';
+    if (!r.canDrive) { b.disabled = true; b.title = 'Only a robot that is out on the road can drive'; }
+    b.addEventListener('click', () => { S.driveRobot(r.id); closeMenu(); });
+    rmenu.append(b); rmenu.hidden = false;
+    const w = rmenu.offsetWidth, h = rmenu.offsetHeight; rmenu.style.left = Math.min(e.clientX, innerWidth - w - 8) + 'px'; rmenu.style.top = Math.min(e.clientY, innerHeight - h - 8) + 'px';
+    if (!b.disabled) b.focus();
+  });
+  addEventListener('pointerdown', e => { if (!rmenu.contains(e.target)) closeMenu(); }, true);
+  addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
+  addEventListener('wheel', closeMenu, { passive: true }); addEventListener('blur', closeMenu);
   function pickAt() {
     ray.setFromCamera(ptr, camera); ray.ray.origin.addScaledVector(ray.ray.direction, camera.near); // start at the (negative) near plane so foreground stays pickable
     const hits = ray.intersectObjects(pickables, false);
@@ -1832,12 +1856,16 @@ function buildScene(ctx) {
       const a = P.pts[r.pi], b = P.pts[r.pi + 1] || a, sl = (P.cum[r.pi + 1] ?? P.cum[r.pi]) - P.cum[r.pi], u = sl > 1e-6 ? (r.s - P.cum[r.pi]) / sl : 1; r.x = a[0] + (b[0] - a[0]) * u; r.z = a[1] + (b[1] - a[1]) * u; return; }
     for (let j = r.pi + 1; j < P.pts.length; j++) { const ds = P.cum[j] - r.s; if (ds > brake) break; vA = Math.min(vA, Math.sqrt(P.cap[j] * P.cap[j] + 2 * ACC * Math.max(0, ds))); }
     vA = Math.max(vA, .35); // creep speed so the final approach always ends
-    r.why = ''; r.wait = false; const g = aheadGap(r); if (g < 1e8) { const vg = Math.sqrt(2 * DEC * .8 * Math.max(0, g - GAPD)); if (vg < vA) { vA = vg; r.why = 'f'; } }
+    if (r.force > 0) { // "Drive" from the robot menu: ignore yields, boxes and spacing for a moment, so a jam (a full roundabout) clears
+      r.force -= dt; r.why = 'd'; r.wait = false; r.blk = null; r.stillT = 0;
+      for (const j of r.J) if (!j.held && !j.done && r.s > j.a - .6) j.done = true; // boxes driven through without a lock never stop me afterwards
+      r.v = Math.min(Math.min(vA, VC), r.v + ACC * dt); }
+    else { r.why = ''; r.wait = false; const g = aheadGap(r); if (g < 1e8) { const vg = Math.sqrt(2 * DEC * .8 * Math.max(0, g - GAPD)); if (vg < vA) { vA = vg; r.why = 'f'; } }
     const ms = mergeStop(r); if (ms < 1e8) { const vm = Math.sqrt(2 * DEC * Math.max(0, ms - r.s)); if (vm < vA) { vA = vm; r.why = 'm'; } r.wait = true; }
     const bs = boxStop(r); if (bs < 1e8) { const vb = Math.sqrt(2 * DEC * Math.max(0, bs - r.s)); if (vb < vA) { vA = vb; r.why = 'b'; } r.wait = true; }
     const ys = rbStop(r); if (ys < 1e8) { const vy = Math.sqrt(2 * DEC * Math.max(0, ys - r.s)); if (vy < vA) { vA = vy; r.why = 'y'; } r.wait = true; }
     r.v = r.v < vA ? Math.min(vA, r.v + ACC * dt) : Math.max(vA, r.v - DEC * dt);
-    if (r.v > 0 && sepHold(r, dt)) { r.v = 0; r.why = 'h'; return; } // hard guard: never close in on another robot (or the tow truck) below the robot length
+    if (r.v > 0 && sepHold(r, dt)) { r.v = 0; r.why = 'h'; return; } } // hard guard: never close in on another robot (or the tow truck) below the robot length
     r.s = Math.min(P.len, r.s + r.v * dt);
     while (r.pi < P.pts.length - 2 && P.cum[r.pi + 1] <= r.s) r.pi++;
     const a = P.pts[r.pi], b = P.pts[r.pi + 1] || a, sl = (P.cum[r.pi + 1] ?? P.cum[r.pi]) - P.cum[r.pi], u = sl > 1e-6 ? (r.s - P.cum[r.pi]) / sl : 1;
@@ -2369,7 +2397,15 @@ function buildScene(ctx) {
         else set('Break down', false, 'Force a robot breakdown: watch the tow truck and the repair garage', false); };
       b.addEventListener('click', () => { if (b.getAttribute('aria-disabled') === 'true') return; BRK.force(); upd(); });
       upd(); setInterval(upd, 250); } }
-  return { sync, frame, layoutLabels, focusOf, anchorOf, hover, home, unfocus() { focusF = null; markLine(null); }, onFloor: id => facs.has(id),
+  function robotAt(cx, cy) { // the robot under a screen point (instanced, so by projected distance), or null
+    const v = new THREE.Vector3(), W = innerWidth, H = innerHeight; let best = null, bd = Math.max(14, 22 * ctx.camera.zoom) ** 2;
+    for (const r of robots) { if (r.dying || r.born < 1) continue; v.set(r.x, .2, r.z).project(ctx.camera);
+      const d = ((v.x + 1) / 2 * W - cx) ** 2 + ((1 - v.y) / 2 * H - cy) ** 2; if (d < bd) { bd = d; best = r; } }
+    return best && { id: best.id, canDrive: best.st === 'go' && !best.broken && !best.towed && !best.shoulder, moving: best.v > .3 };
+  }
+  function driveRobot(id) { const r = robots.find(o => o.id === id); if (!r || r.st !== 'go' || r.broken || r.towed || r.shoulder) return false; r.force = 2.5; r.back = 0; return true; }
+  window.__fac.drive = driveRobot; // test hook
+  return { sync, frame, layoutLabels, focusOf, anchorOf, hover, home, robotAt, driveRobot, unfocus() { focusF = null; markLine(null); }, onFloor: id => facs.has(id),
     lineSlots: id => { const l = lineIdx.get(id); return l ? new Set(l.slots.filter(Boolean)) : null; } };
 }
 
