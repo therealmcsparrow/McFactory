@@ -22,7 +22,7 @@
   async function post(path, body) {
     const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-chat-token': TOKEN }, body: JSON.stringify(body || {}) });
     let j = {}; try { j = await r.json(); } catch { }
-    if (!r.ok) throw new Error(j.error || 'request failed (' + r.status + ')');
+    if (!r.ok) { const e = new Error(j.error || 'request failed (' + r.status + ')'); e.status = r.status; throw e; }
     return j;
   }
   const money = c => '$' + (+c || 0).toFixed(4);
@@ -81,8 +81,11 @@
   const input = h('textarea', { rows: 1, 'aria-label': 'Message to the session', placeholder: 'Message, Enter to send, Shift+Enter for a new line', spellcheck: 'false' });
   const sendBtn = h('button', { class: 'cb-btn pri', type: 'button', text: 'Send', onclick: () => send() });
   const form = h('div', { class: 'chat-in' }, input, sendBtn);
-  const panel = h('section', { id: 'chat', class: 'chat', 'aria-label': 'Session chat', hidden: true }, head, logEl, pendEl, errEl, form,
-    h('div', { class: 'chat-note', text: 'Dashboard-started session. Messages stay on this machine.' }));
+  const nowCb = h('input', { type: 'checkbox', id: 'chat-now' });
+  const nowWrap = h('label', { class: 'chat-now', hidden: true }, nowCb, 'Send now (interrupts)');
+  const NOTE = { owned: 'Dashboard-started session. Messages stay on this machine.', peer: 'Terminal or desktop session. Your messages arrive as from a teammate; approvals stay in the permission cards.' };
+  const noteEl = h('div', { class: 'chat-note', text: NOTE.owned });
+  const panel = h('section', { id: 'chat', class: 'chat', 'aria-label': 'Session chat', hidden: true }, head, logEl, pendEl, errEl, form, nowWrap, noteEl);
   detailEl?.append(panel);
   input.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
@@ -91,21 +94,25 @@
   });
   input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(120, input.scrollHeight) + 'px'; });
 
-  let cur = null;           // {id, es, meta, pendKey}
+  let cur = null;           // {id, mode: 'owned'|'peer', es, meta, pendKey, last, ro}
   let focusOnReady = false;
   function closeStream() { if (cur && cur.es) cur.es.close(); cur = null; }
-  function showFor(id) {
+  function showFor(id, mode = 'owned') {
     if (!id) { panel.hidden = true; detailEl?.classList.remove('has-chat'); closeStream(); return; }
     panel.hidden = false; detailEl?.classList.add('has-chat');
-    if (cur && cur.id === id) { maybeFocus(); return; }
+    if (cur && cur.id === id && cur.mode === mode) { maybeFocus(); return; }
     closeStream(); logEl.replaceChildren(); pendEl.replaceChildren(); errEl.textContent = '';
-    const c = cur = { id, es: null, meta: null, pendKey: '', last: 0 };
-    const es = c.es = new EventSource(`/api/chat/${encodeURIComponent(id)}/stream?token=${encodeURIComponent(TOKEN)}`);
+    const peer = mode === 'peer';
+    stopBtn.hidden = peer; nowWrap.hidden = !peer; nowCb.checked = false; noteEl.textContent = NOTE[mode]; headCost.textContent = '';
+    input.disabled = sendBtn.disabled = true; input.placeholder = 'Message, Enter to send, Shift+Enter for a new line';
+    const c = cur = { id, mode, es: null, meta: null, pendKey: '', last: 0, ro: '' };
+    const es = c.es = new EventSource(`/api/${peer ? 'peer' : 'chat'}/${encodeURIComponent(id)}/stream?token=${encodeURIComponent(TOKEN)}`);
     es.addEventListener('init', e => { if (cur !== c) return; const d = JSON.parse(e.data); logEl.replaceChildren(); c.last = 0; for (const x of d.log) addLog(x); c.meta = d.meta; c.pendKey = ''; paint(); scrollDown(true); maybeFocus(); });
     es.addEventListener('entry', e => { if (cur !== c) return; addLog(JSON.parse(e.data)); });
     es.addEventListener('meta', e => { if (cur !== c) return; c.meta = JSON.parse(e.data); paint(); maybeFocus(); });
-    es.onerror = () => { if (cur === c && es.readyState === 2) { errEl.textContent = 'Chat stream closed. This session is no longer tracked by the dashboard.'; } };
+    es.onerror = () => { if (cur === c && es.readyState === 2) { errEl.textContent = peer ? 'Chat stream closed.' : 'Chat stream closed. This session is no longer tracked by the dashboard.'; } };
   }
+  const reopen = () => { if (cur) { const { id, mode } = cur; closeStream(); showFor(id, mode); } };
   function maybeFocus() {
     if (!focusOnReady || panel.hidden || !cur || !cur.meta) return;
     focusOnReady = false;
@@ -116,7 +123,9 @@
   function addLog(x) {
     if (x.i <= (cur ? cur.last : 0)) return; if (cur) cur.last = x.i;
     const stick = nearBottom(); let el;
-    if (x.kind === 'user') el = h('div', { class: 'cm user' }, h('small', { text: 'You' }), x.text);
+    const peer = cur && cur.mode === 'peer';
+    if (x.kind === 'user') el = h('div', { class: 'cm user' }, h('small', { text: peer ? 'You (in session)' : 'You' }), x.text);
+    else if (x.kind === 'peer') el = h('div', { class: 'cm user peer' + (x.via === 'dashboard' ? '' : ' other') }, h('small', { text: x.via === 'dashboard' ? 'You (dashboard)' : 'Another session' }), x.text);
     else if (x.kind === 'assistant') el = h('div', { class: 'cm assistant' }, h('small', { text: 'Claude' }), x.text);
     else if (x.kind === 'tool') el = h('div', { class: 'cl tool' }, h('b', { text: '▸ ' + x.name }), x.text);
     else if (x.kind === 'request') el = h('div', { class: 'cl request' }, h('b', { text: '? ' + x.name }), x.text);
@@ -128,6 +137,14 @@
   }
   function paint() {
     const m = cur && cur.meta; if (!m) return;
+    if (cur.mode === 'peer') {
+      const ro = m.live === false ? 'Session closed: read-only' : m.canSend === false ? 'Sending is not available for this session right now: read-only' : cur.ro;
+      head.dataset.s = m.live === false ? 'ended' : m.status === 'busy' ? 'busy' : m.status === 'waiting' ? 'ask' : 'idle';
+      headTxt.textContent = m.live === false ? 'Closed' : m.status === 'busy' ? 'Working…' : m.status === 'waiting' ? 'Needs you' : 'Idle';
+      input.disabled = sendBtn.disabled = nowCb.disabled = !!ro;
+      input.placeholder = ro || 'Message, Enter to send, Shift+Enter for a new line';
+      return;
+    }
     const asking = m.pending.length > 0;
     head.dataset.s = !m.alive ? 'ended' : asking ? 'ask' : m.busy ? 'busy' : 'idle';
     headTxt.textContent = !m.alive ? 'Ended' : asking ? 'Needs you' : m.busy ? 'Working…' : 'Your turn';
@@ -140,9 +157,17 @@
   async function send() {
     const text = input.value.trim(); if (!text || !cur || sendBtn.disabled) return;
     errEl.textContent = ''; sendBtn.disabled = true;
-    try { await post(`/api/chat/${encodeURIComponent(cur.id)}/send`, { text }); input.value = ''; input.style.height = ''; }
-    catch (e) { errEl.textContent = e.message; }
-    finally { if (cur && cur.meta && cur.meta.alive) sendBtn.disabled = false; input.focus(); }
+    const c = cur, peer = c.mode === 'peer';
+    try {
+      if (peer) await post(`/api/peer/${encodeURIComponent(c.id)}/send`, { text, priority: nowCb.checked ? 'now' : 'next' });
+      else await post(`/api/chat/${encodeURIComponent(c.id)}/send`, { text });
+      input.value = ''; input.style.height = ''; nowCb.checked = false;
+    } catch (e) { errEl.textContent = e.message; if (peer && (e.status === 502 || e.status === 404)) c.ro = 'Sending is not available for this session right now: read-only'; }
+    finally {
+      if (cur === c && peer) paint();
+      else if (cur && cur.meta && cur.meta.alive) sendBtn.disabled = false;
+      if (!input.disabled) input.focus();
+    }
   }
   async function stop() {
     if (!cur) return; errEl.textContent = ''; stopBtn.disabled = true;
@@ -206,6 +231,7 @@
   // ───────── terminal/desktop sessions with a prompt the dashboard can answer through the global hook (server.js /api/ext/*)
   // The terminal shows the same prompt: first answer wins. Only tool name + a short summary come from the server.
   let extTasks = new Map(); // taskId -> task with t.ext.pending > 0 (never owned sessions)
+  let peerTasks = new Set(); // taskIds of live terminal/desktop sessions the dashboard can message (server.js /api/peer/*)
   const extErr = h('div', { class: 'chat-err', role: 'alert' });
   const extPend = h('div', { class: 'chat-pend', 'aria-label': 'Prompts waiting for you' });
   const extPanel = h('section', { id: 'ext-prompt', class: 'chat ext', 'aria-label': 'Prompt waiting for you', hidden: true },
@@ -242,7 +268,8 @@
   window.addEventListener('factory:detail', e => { lastDetail = e.detail || null; refreshDetail(); });
   function refreshDetail() {
     const id = taskOfDetail(lastDetail), isOwned = !!(id && owned.has(id));
-    showFor(isOwned ? id : null);
+    const isPeer = !isOwned && !!id && (peerTasks.has(id) || (cur && cur.mode === 'peer' && cur.id === id));
+    showFor(isOwned || isPeer ? id : null, isPeer ? 'peer' : 'owned');
     showExt(!isOwned && id && extTasks.has(id) ? id : null); updateAlert();
   }
 
@@ -305,6 +332,8 @@
     for (const p of state.projects) for (const t of p.tasks) if (t.owned) { m.set(t.id, { task: t, project: p }); if (t.chat && t.chat.pending > 0) n.push(t); }
     const x = new Map(); for (const p of state.projects) for (const t of p.tasks) if (!t.owned && t.ext && t.ext.pending > 0) x.set(t.id, t);
     extTasks = x;
+    const pt = new Set(); for (const p of state.projects) for (const t of p.tasks) if (!t.owned && t.peer && t.peer.live) pt.add(t.id);
+    peerTasks = pt;
     owned = m; needy = n; updateAlert(); tryWanted(); refreshDetail();
   });
 })();

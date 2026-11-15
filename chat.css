@@ -99,6 +99,14 @@ dialog.cn::backdrop{background:oklch(10% 0.005 260 / .72);backdrop-filter:blur(3
 .chat-in textarea{min-height:38px;max-height:120px;resize:none;font:500 13px/1.4 var(--font-mono)}
 .chat-in textarea[disabled]{opacity:.5}
 .chat-note{font:400 10.5px var(--font-mono);color:var(--color-ink-3)}
+.chat-now{display:flex;align-items:center;gap:6px;font:500 11px var(--font-mono);color:var(--color-ink-2);cursor:pointer;width:max-content}
+.chat-now[hidden]{display:none}
+.chat-now input{accent-color:var(--color-human);margin:0}
+.chat-now input:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+.chat-now:has(input[disabled]){opacity:.5;cursor:default}
+.cm.peer{box-shadow:inset 2px 0 0 var(--color-signal)}
+.cm.peer.other{align-self:flex-start;background:var(--color-raise)}
+.chat-head .cb-btn[hidden]{display:none}
 .chat-err{font:500 11px var(--font-mono);color:var(--color-bad-ink)}
 .chat-err:empty{display:none}
 @media (max-width:820px){.chat-alert{left:12px;bottom:12px}#detail.has-chat{left:12px;right:12px;width:auto;top:auto;bottom:12px;height:78vh;max-height:78vh}#detail.has-chat #detail-body{max-height:16vh}}
