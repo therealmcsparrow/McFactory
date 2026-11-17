@@ -10,17 +10,22 @@ The terminal still shows its own dialog at the same time. **The first answer win
 node server.js --install-hook
 ```
 
-This merges one entry into `~/.claude/settings.json`. Other keys and hooks stay; running it again replaces only this entry. Options:
+This merges two entries into `~/.claude/settings.json`: the permission hook and the AskUserQuestion hook (see below). Other keys and hooks stay; running it again replaces only these entries. Options:
 
 - `--port <n>`: the port in the hook's URL (default 4545). It must match the port the server runs on.
 - `--settings <file>`: change another settings file.
-- `--with-ask`: also add the AskUserQuestion hook (see below).
+- `--no-ask`: leave out the AskUserQuestion hook.
 
-The entry it adds:
+The entries it adds:
 
 ```json
-{"hooks":{"PermissionRequest":[{"hooks":[{"type":"http","url":"http://127.0.0.1:4545/hook/permission","timeout":300}]}]}}
+{"hooks":{
+  "PermissionRequest":[{"hooks":[{"type":"http","url":"http://127.0.0.1:4545/hook/permission","timeout":300}]}],
+  "PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"http","url":"http://127.0.0.1:4545/hook/pretool","timeout":300}]}]
+}}
 ```
+
+If you installed the hook before version 0.1.4, run `--install-hook` again to add the AskUserQuestion entry.
 
 To remove it:
 
@@ -56,26 +61,25 @@ Anything doubtful ends this way, so the worst case is answering in the terminal 
 
 ## Not handled by the hook
 
-- Sessions started from the dashboard: they are answered in their own chat panel, so the hook answers empty at once.
+- Sessions started or continued from the dashboard: they are answered in their own chat panel, so the hook answers empty at once.
 - AskUserQuestion on the permission hook.
 - Requests that are not valid JSON.
 - More than 8 prompts per session, or 20 in total.
 
 `node server.js --no-hook` turns all of this off: every hook call gets an empty answer at once.
 
-## AskUserQuestion (off by default)
+## AskUserQuestion (choices forms)
 
-With `--ask-hook` (or `AICO_DASH_ASK=1`) on the server and `--install-hook --with-ask` in the settings, questions from your terminal sessions also show in the dashboard as the question card.
+When Claude asks you a question with choices in a terminal or desktop session, the dashboard shows it as the same form you get in a dashboard chat: options, "Other" with your own text, and **Send answer** / **Skip**.
 
-It is off because it is not yet checked whether the terminal shows its question while this hook is waiting. If it only shows after the hook returns, the terminal would wait until you answer in the dashboard or the hook times out.
+A PreToolUse hook runs before the tool, so the terminal shows its own question only after the hook returns. That is why the server holds a question **only while you look at that session in the dashboard**: its chat panel or its prompt card is open.
 
-To check it yourself:
+- Nobody looks: the hook answers empty at once and the terminal asks as usual. Nothing waits.
+- The panel is open: the form shows in the dashboard. The terminal waits until you answer or skip there. Press Esc in the terminal to cancel it there instead.
+- You close the panel, or switch to another session, while a question waits: after 3 seconds it goes back to the terminal.
+- The release rules above (process gone, transcript moved on, 280 seconds) still apply.
 
-1. In a throwaway folder, add a PreToolUse command hook with matcher `AskUserQuestion` that writes a timestamp to a log, sleeps 20 seconds, writes a second timestamp and exits 0.
-2. Start an interactive `claude` there and ask it to use AskUserQuestion.
-3. If the question appears at once, the feature is safe to turn on. If it appears only after about 20 seconds, leave it off.
-
-Headless `claude -p` has no AskUserQuestion tool, so this cannot be checked there.
+The server has this on by default. `node server.js --no-ask-hook` (or `AICO_DASH_ASK=0`) turns it off: every question is then answered in the terminal only.
 
 ## Known limits
 

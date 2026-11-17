@@ -39,7 +39,7 @@ A change in a transcript reaches an open page within about 0.2 seconds.
 
 | Method and path | Token | Body and answer |
 |-----------------|-------|-----------------|
-| `POST /api/chat/start` | yes | `{cwd, model, effort, prompt, skipPermissions?}` → `{id}` (the session ID). `skipPermissions` must be `true` or `false` when sent; anything else is 400. `cwd` must be an absolute path to an existing local folder. |
+| `POST /api/chat/start` | yes | `{cwd, model, effort, prompt, skipPermissions?}` → `{id}` (the session ID). `skipPermissions` must be `true` or `false` when sent; anything else is 400. `cwd` must be an absolute path to an existing local folder. With `{resume: <session id>, prompt, model?, effort?}` instead of `cwd` it continues an existing session here (`claude --resume`), in the folder from its transcript, and the log starts with the conversation so far. 409 while that session is still open in a terminal or the desktop app, or already runs here; 404 no transcript. |
 | `POST /api/chat/:id/send` | yes | `{text}` |
 | `POST /api/chat/:id/answer` | yes | `{request_id, behavior: "allow"\|"deny", answers?, message?}`. `answers` is `{questionText: label}`; multi-select labels are joined by `", "`. |
 | `POST /api/chat/:id/stop` | yes | Stops the session. |
@@ -69,9 +69,9 @@ Each task in `/api/state` has `mode`: `brainstorm`, `cooler` or `null`. It is se
 | Method and path | Token | Body and answer |
 |-----------------|-------|-----------------|
 | `POST /hook/permission` | no (loopback only) | Called by Claude Code's PermissionRequest hook. Held until answered; see [Answer prompts from the dashboard](permission-hook.md). |
-| `POST /hook/pretool` | no (loopback only) | Called by the PreToolUse hook for AskUserQuestion. Off unless `--ask-hook`. |
+| `POST /hook/pretool` | no (loopback only) | Called by the PreToolUse hook for AskUserQuestion. Held only while a chat panel or prompt card of that session is open, otherwise answered empty at once. Off with `--no-ask-hook`. |
 | `GET /api/ext/:sid/stream?token=` | yes | Event stream of hook prompts for a session. |
-| `POST /api/ext/:sid/answer` | yes | `{id, behavior: "allow"\|"deny", message?}` |
+| `POST /api/ext/:sid/answer` | yes | `{id, behavior: "allow"\|"deny", answers?, message?}`. `answers` as for dashboard sessions, for a question. |
 
 ## Page files
 

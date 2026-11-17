@@ -142,6 +142,8 @@
   const nowWrap = h('label', { class: 'chat-now', hidden: true }, nowCb, 'Send now (interrupts)');
   const NOTE: Record<ChatMode, string> = { owned: 'Dashboard-started session. Messages stay on this machine.', peer: 'Terminal or desktop session. Your messages arrive as from a teammate; approvals stay in the permission cards.',
     agent: 'Subagent screen, read-only: its own text and tool names. To message the session, open its main agent.' };
+  const RESUME_NOTE = 'Closed in the terminal. Continue here reopens it in the dashboard (claude --resume): messages, approvals and questions then go straight through. Keep it closed in the terminal while it runs here.';
+  const resumedAt = new Map<string, number>(); // session id -> when Continue here started it: owned before the next snapshot says so
   const isOffice = () => document.body.classList.contains('v-office'); // office view: a subagent's desk shows its own screen (server.js /api/agent/*); asked late, index.html sets the class after this script loads
   const noteEl = h('div', { class: 'chat-note', text: NOTE.owned });
   const panel = h('section', { id: 'chat', class: 'chat', 'aria-label': 'Session chat', hidden: true }, head, logEl, pendEl, errEl, form, nowWrap, noteEl);
@@ -169,7 +171,7 @@
     const peer = mode === 'peer', agent = mode === 'agent'; // agent: read-only, nothing to send, stop or answer
     stopBtn.hidden = peer || agent; nowWrap.hidden = !peer; form.hidden = agent; nowCb.checked = false; noteEl.textContent = NOTE[mode]; headCost.textContent = ''; headSkip.hidden = true;
     panel.setAttribute('aria-label', agent ? 'Subagent screen (read-only)' : 'Session chat'); logEl.setAttribute('aria-label', agent ? 'Subagent screen log' : 'Chat log');
-    input.disabled = sendBtn.disabled = true; input.placeholder = 'Message, Enter to send, Shift+Enter for a new line';
+    input.disabled = sendBtn.disabled = true; sendBtn.textContent = 'Send'; input.placeholder = 'Message, Enter to send, Shift+Enter for a new line';
     const c: ChatCur = cur = { id, mode, es: null, meta: null, pendKey: '', last: 0 };
     const es = c.es = new EventSource(`/api/${agent ? 'agent' : peer ? 'peer' : 'chat'}/${encodeURIComponent(id)}/stream?token=${encodeURIComponent(TOKEN)}`);
     es.addEventListener('init', e => { if (cur !== c) return; const d: { meta: ChatMeta; log: LogEntry[] } = JSON.parse(e.data); logEl.replaceChildren(); c.last = 0; c.meta = d.meta; for (const x of d.log) addLog(x);
@@ -216,19 +218,23 @@
       return;
     }
     if (cur!.mode === 'peer') {
-      const ro = m.live === false ? 'Session closed: read-only' : m.canSend === false ? 'Sending is not available for this session right now: read-only' : ''; // the server's meta is the only lock
-      head.dataset.s = m.live === false ? 'ended' : m.status === 'busy' ? 'busy' : m.status === 'waiting' ? 'ask' : 'idle';
-      headTxt.textContent = m.live === false ? 'Closed' : m.status === 'busy' ? 'Working…' : m.status === 'waiting' ? 'Needs you' : 'Idle';
-      input.disabled = sendBtn.disabled = nowCb.disabled = !!ro;
-      input.placeholder = ro || 'Message, Enter to send, Shift+Enter for a new line';
+      const closed = m.live === false; // closed in the terminal: the next message continues it here (claude --resume)
+      const ro = !closed && m.canSend === false ? 'Sending is not available for this session right now: read-only' : ''; // the server's meta is the only lock
+      head.dataset.s = closed ? 'ended' : m.status === 'busy' ? 'busy' : m.status === 'waiting' ? 'ask' : 'idle';
+      headTxt.textContent = closed ? 'Closed in the terminal' : m.status === 'busy' ? 'Working…' : m.status === 'waiting' ? 'Needs you' : 'Idle';
+      input.disabled = sendBtn.disabled = !!ro; nowCb.disabled = !!ro || closed; nowWrap.hidden = closed;
+      sendBtn.textContent = closed ? 'Continue here' : 'Send';
+      noteEl.textContent = closed ? RESUME_NOTE : NOTE.peer;
+      input.placeholder = ro || (closed ? 'Message to continue this session here' : 'Message, Enter to send, Shift+Enter for a new line');
       return;
     }
     const asking = m.pending!.length > 0;
     head.dataset.s = !m.alive ? 'ended' : asking ? 'ask' : m.busy ? 'busy' : 'idle';
     headTxt.textContent = !m.alive ? 'Ended' : asking ? 'Needs you' : m.busy ? 'Working…' : 'Your turn';
     headCost.textContent = m.cost ? money(m.cost) : '';
-    stopBtn.disabled = !m.alive; input.disabled = !m.alive; sendBtn.disabled = !m.alive;
-    if (!m.alive) input.placeholder = 'Session ended';
+    stopBtn.disabled = !m.alive; input.disabled = sendBtn.disabled = false; // ended: the next message continues it (claude --resume)
+    sendBtn.textContent = m.alive ? 'Send' : 'Continue here';
+    input.placeholder = m.alive ? 'Message, Enter to send, Shift+Enter for a new line' : 'Session ended. A message continues it here';
     const key = m.pending!.map(r => r.request_id).join(',');
     if (key !== cur!.pendKey) { cur!.pendKey = key; pendEl.replaceChildren(...m.pending!.map(renderPending)); }
   }
@@ -236,13 +242,21 @@
     const text = input.value.trim(); if (!text || !cur || sendBtn.disabled) return;
     errEl.textContent = ''; sendBtn.disabled = true;
     const c = cur, peer = c.mode === 'peer';
+    const resume = !!c.meta && (peer ? c.meta.live === false : c.meta.alive === false); // closed or ended: reopen it as a dashboard session
+    if (resume) sendBtn.textContent = 'Continuing…';
     try {
+      if (resume) {
+        const r = await post('/api/chat/start', { resume: c.id, prompt: text });
+        input.value = ''; input.style.height = '';
+        if (r.id) { resumedAt.set(r.id, Date.now()); closeStream(); showFor(r.id, 'owned'); openSession(r.id); } // the snapshot marks it owned within a second
+        return;
+      }
       if (peer) await post(`/api/peer/${encodeURIComponent(c.id)}/send`, { text, priority: nowCb.checked ? 'now' : 'next' });
       else await post(`/api/chat/${encodeURIComponent(c.id)}/send`, { text });
       input.value = ''; input.style.height = ''; nowCb.checked = false;
     } catch (e) { errEl.textContent = (e as Error).message; } // a 502 locks via the server's meta push; a 404 only shows the error
     finally {
-      if (cur === c && peer) paint();
+      if (cur === c && (peer || resume)) { if (c.meta) paint(); if (resume) sendBtn.disabled = false; }
       else if (cur && cur.meta && cur.meta.alive) sendBtn.disabled = false;
       if (!input.disabled) input.focus();
     }
@@ -310,6 +324,7 @@
   // The terminal shows the same prompt: first answer wins. Only tool name + a short summary come from the server.
   let extTasks = new Map<string, Task>(); // taskId -> task with t.ext.pending > 0 (never owned sessions)
   let peerTasks = new Set<string>(); // taskIds of live terminal/desktop sessions the dashboard can message (server.js /api/peer/*)
+  let sessTasks = new Set<string>(); // taskIds of every session the dashboard did not start (open or closed): the panel shows them, closed ones offer Continue here
   const extErr = h('div', { class: 'chat-err', role: 'alert' });
   const extPend = h('div', { class: 'chat-pend', 'aria-label': 'Prompts waiting for you' });
   const extPanel = h('section', { id: 'ext-prompt', class: 'chat ext', 'aria-label': 'Prompt waiting for you', hidden: true },
@@ -345,8 +360,8 @@
   let lastDetail: Detail = null;
   window.addEventListener('factory:detail', e => { lastDetail = (e as CustomEvent<Detail>).detail || null; refreshDetail(); });
   function refreshDetail() {
-    const id = taskOfDetail(lastDetail), isOwned = !!(id && owned.has(id));
-    const isPeer = !isOwned && !!id && (peerTasks.has(id) || (cur && cur.mode === 'peer' && cur.id === id));
+    const id = taskOfDetail(lastDetail), isOwned = !!(id && (owned.has(id) || Date.now() - (resumedAt.get(id) || 0) < 15e3));
+    const isPeer = !isOwned && !!id && (peerTasks.has(id) || sessTasks.has(id) || (cur && cur.mode === 'peer' && cur.id === id)); // closed ones too: Continue here
     const sub = isOffice() && lastDetail && lastDetail.kind === 'agent' && /^a-/.test(lastDetail.id) ? lastDetail.id : null; // office view: a subagent shows its own screen
     if (sub) showFor(sub, 'agent'); else showFor(isOwned || isPeer ? id : null, isPeer ? 'peer' : 'owned');
     showExt(!isOwned && id && extTasks.has(id) ? id : null); updateAlert();
@@ -479,6 +494,8 @@
     extTasks = x;
     const pt = new Set<string>(); for (const p of state.projects) for (const t of p.tasks) if (!t.owned && t.peer && t.peer.live) pt.add(t.id);
     peerTasks = pt;
+    const st = new Set<string>(); for (const p of state.projects) for (const t of p.tasks) if (!t.owned) st.add(t.id);
+    sessTasks = st;
     owned = m; needy = n; updateAlert(); tryWanted(); refreshDetail();
   });
 })();

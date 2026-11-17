@@ -1,6 +1,6 @@
 # Chat with terminal and desktop sessions
 
-Sessions you started in the Claude CLI or the Claude desktop app get the same chat panel while they are live: a running process with a messaging pipe. The note under the input reads "Terminal or desktop session. Your messages arrive as from a teammate; approvals stay in the permission cards."
+Sessions you started in the Claude CLI or the Claude desktop app get the same chat panel. While they are live (a running process with a messaging pipe) you can message them; once closed you can continue them here. The note under the input reads "Terminal or desktop session. Your messages arrive as from a teammate; approvals stay in the permission cards."
 
 ## What you see
 
@@ -31,12 +31,25 @@ The panel shows each one as **Held by the session, not delivered**, with what to
 
 The dashboard never claims a permission mode to get past this check. It is a Claude Code safety control and stays your decision.
 
+Claude Code may ask you to approve a message from outside in the terminal. A message from the dashboard never counts as your consent there. To send without that, continue the session in the dashboard (below).
+
+## Questions with choices
+
+When Claude asks a question with choices (AskUserQuestion) while this panel is open, the question shows here as a form. The terminal waits while it is shown here. Close the panel and after 3 seconds the terminal asks instead. See [Answer prompts from the dashboard](permission-hook.md#askuserquestion-choices-forms).
+
+## Continue here
+
+A session that is closed in the terminal or the desktop app keeps its panel, with the history. The button reads **Continue here**: type a message and press it (or Enter). The dashboard then reopens the session as its own (`claude --resume <id>`, in the folder the session ran in), with your message as the next turn.
+
+From then on it is a dashboard session: messages go straight through, and approvals and questions come as cards in the chat. It keeps its ID, so the terminal can pick it up again later with `claude --resume`. Stop it in the dashboard first.
+
+While the session is still open in a terminal or the desktop app, it is refused: "close it there first (/exit), then continue it here". Two programs writing one session would mix up its transcript.
+
+A dashboard session that has ended offers **Continue here** the same way.
+
 ## Read-only
 
-The input locks with a reason when:
-
-- the session closes ("Session closed: read-only"), or
-- sending fails, for example when the pipe does not answer ("Sending is not available for this session right now: read-only").
+The input locks with a reason when sending fails, for example when the pipe does not answer ("Sending is not available for this session right now: read-only").
 
 It unlocks when the session's status or process changes.
 

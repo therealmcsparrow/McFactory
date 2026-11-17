@@ -32,14 +32,14 @@ Stop the server with Ctrl+C. Sessions started from the dashboard are stopped cle
 | `--static <dir>` | Folder with the built page files (`index.html`, `app/main.js` and the rest). Default: `dist/` next to `server.js`, written by `npm run build`. The desktop app uses this. |
 | `--settings <file>` | Claude Code settings file to change for the hook and the status line. Default `~/.claude/settings.json`. |
 | `--no-hook` | Turns the global hook endpoints off: every hook call gets an empty answer at once. |
-| `--ask-hook` | Turns on the AskUserQuestion hook endpoint (off by default, see [Answer prompts from the dashboard](permission-hook.md)). |
+| `--no-ask-hook` | Turns the AskUserQuestion hook endpoint off, so questions are answered only in the terminal (on by default, see [Answer prompts from the dashboard](permission-hook.md)). |
 | `--no-statusline` | Does not install the status line, so plan limits are not shown. |
 
 One-off commands, which change the settings file and exit:
 
 | Command | What it does |
 |---------|--------------|
-| `node server.js --install-hook [--with-ask] [--port n]` | Adds the global permission hook (and, with `--with-ask`, the AskUserQuestion hook) to the settings file. |
+| `node server.js --install-hook [--no-ask] [--port n]` | Adds the global permission hook and the AskUserQuestion hook (left out with `--no-ask`) to the settings file. |
 | `node server.js --uninstall-hook` | Removes only the hook entries this server added. |
 | `node server.js --uninstall-statusline` | Removes the status line, only when it is the one this server added. |
 
@@ -48,7 +48,8 @@ One-off commands, which change the settings file and exit:
 | Variable | What it does |
 |----------|--------------|
 | `CLAUDE_BIN` | Full path of the `claude` program used for dashboard sessions. Without it the server looks for `claude` on `PATH`, then in `~/.local/bin`. |
-| `AICO_DASH_ASK=1` | Same as `--ask-hook`. |
+| `AICO_DASH_ASK=0` | Same as `--no-ask-hook`. |
+| `AICO_DASH_UNWATCH_MS` | How long a held question waits after its dashboard panel closes before it goes back to the terminal (milliseconds). Default 3000. For tests. |
 | `AICO_DASH_HOLD_MS` | How long a hook prompt is held before the terminal decides (milliseconds). Default 280000. For tests. |
 | `AICO_DASH_NO_SWEEP=1` | Turns off the background release checks of held hook prompts. Tests only. |
 

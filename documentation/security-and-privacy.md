@@ -40,7 +40,7 @@ The **peer token** of a terminal or desktop session (from its `.key` file) is re
 
 | File | When | What |
 |------|------|------|
-| `~/.claude/settings.json` | Only with `--install-hook`, and when you have no status line | The hook entry, or the status line entry. Other keys are kept. |
+| `~/.claude/settings.json` | Only with `--install-hook`, and when you have no status line | The two hook entries (permission and AskUserQuestion), or the status line entry. Other keys are kept. |
 | `~/.claude/crate-works-limits.json` and `.jsonl` | When the status line runs | Limit percentages and reset times only. |
 
 Chat logs of dashboard sessions are kept in memory only. Claude Code itself still writes its normal transcripts.
