@@ -44,7 +44,10 @@ jobs:
             exit 1
           fi
 
-      - name: Tests
+      - name: Install (TypeScript, three types)
+        run: npm ci --ignore-scripts
+
+      - name: Tests (builds dist/ first)
         run: npm test
 
       - name: Install desktop build tools

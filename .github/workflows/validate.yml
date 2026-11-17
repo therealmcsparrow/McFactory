@@ -33,9 +33,18 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
 
-      - name: Syntax check
+      - name: Install (TypeScript, three types)
+        run: npm ci --ignore-scripts
+
+      - name: Syntax check (plain JS)
         shell: bash
-        run: for f in server.js chat.js usage.js live-data.js dev/demo/make-demo.js; do node --check "$f"; done
+        run: for f in server.js dev/demo/make-demo.js; do node --check "$f"; done
+
+      - name: Build front end (src/ to dist/)
+        run: npm run build
+
+      - name: Type check
+        run: npm run typecheck
 
       - name: Tests
         run: npm test

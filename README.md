@@ -25,12 +25,13 @@ It runs on your own computer and reads `~/.claude/projects`. Your session data n
 ## Features
 
 - **See everything at a glance.** Halls, lines and arms show which sessions and agents are running, waiting or done. Arm colours show role, model and effort. Totals for tokens, estimated cost and tools are always on screen.
+- **Two scenes.** Switch to the office view for the same data as office buildings, desks and people. Click a person to see their screen.
 - **Needs you.** A blue beacon and signs show when a session waits for your answer or approval.
 - **Start and chat with sessions.** Start a new Claude Code session in any folder, then chat with it, answer its permission prompts and questions, and use its slash commands.
 - **Talk to terminal and desktop sessions.** Send messages to sessions you started in the Claude CLI or the desktop app.
 - **Answer prompts from the dashboard.** An optional global hook shows the permission prompts of all your sessions as Allow / Deny cards. The first answer wins, so the terminal keeps working as before.
 - **Usage.** Plan limits (5-hour and weekly) plus tokens and cost per day and hour, split by model.
-- **No install.** The server uses Node built-ins only.
+- **Small install.** The server uses Node built-ins only; `npm ci` adds just the TypeScript compiler and the three.js types to build the page.
 
 ## Quick start
 
@@ -39,7 +40,8 @@ You need [Node.js](https://nodejs.org/) 22 or later and Claude Code.
 ```sh
 git clone https://github.com/therealmcsparrow/McFactory.git
 cd McFactory
-node server.js
+npm ci
+npm start
 ```
 
 Open <http://127.0.0.1:4545>. If you have no status line yet, the server adds one to `~/.claude/settings.json` so it can read your plan limits (`--no-statusline` skips this).
@@ -72,6 +74,7 @@ Options, environment variables and tests are in [Getting started](documentation/
 |-------|----------------|
 | [Getting started](documentation/getting-started.md) | Requirements, starting the server, options, tests |
 | [The factory view](documentation/factory-view.md) | What every hall, line, arm and crate means |
+| [The office view](documentation/office-view.md) | The second scene: buildings, desks, people, the bank |
 | [Chat and new sessions](documentation/chat.md) | Starting sessions from the dashboard and chatting with them |
 | [Terminal and desktop sessions](documentation/peer-chat.md) | Sending messages to sessions you started elsewhere |
 | [Answer prompts from the dashboard](documentation/permission-hook.md) | The global permission hook |

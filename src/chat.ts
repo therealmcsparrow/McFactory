@@ -4,35 +4,61 @@
  * All text goes in via textContent; nothing from a session is ever set as HTML. */
 (() => {
   'use strict';
+  type Task = import('./common/types.js').Task;
+  type Project = import('./common/types.js').Project;
+  /** The detail card's selection ('factory:detail' event detail). */
+  type Detail = import('./common/types.js').Pick | null;
+  type Kid = Node | string | number | boolean | null | undefined | readonly Kid[];
+  /** One AskUserQuestion question (Claude Code tool input). */
+  interface ChatQuestion { question: string; header?: string; multiSelect?: boolean; options?: { label: string; description?: string }[] }
+  /** A permission or question request waiting for an answer (server.js metaOf pending; ext prompts are mapped to this shape). */
+  interface ChatRequest { request_id: string; tool_name: string; display_name: string; description: string; summary: string; preview: string; questions: ChatQuestion[] | null }
+  /** A prompt of a terminal/desktop session (server.js extMeta). */
+  interface ExtRequest { id: string; kind: 'ask' | (string & {}); tool_name: string; summary: string; questions: ChatQuestion[] | null }
+  /** Stream meta. owned: server.js metaOf; peer: {live, canSend, status}; agent: {role, label, status, sessionId}. */
+  interface ChatMeta {
+    alive?: boolean; busy?: boolean; cost?: number; skipPermissions?: boolean; commands?: string[] | null; pending?: ChatRequest[];
+    live?: boolean; canSend?: boolean; status?: string; role?: string; label?: string; sessionId?: string;
+  }
+  /** One chat log line from the stream. */
+  interface LogEntry { i: number; kind: string; text: string; via?: string; name?: string; error?: boolean; cost?: number; ms?: number }
+  type ChatMode = 'owned' | 'peer' | 'agent';
+  interface ChatCur { id: string; mode: ChatMode; es: EventSource | null; meta: ChatMeta | null; pendKey: string; last: number }
+  interface ExtCur { id: string; es: EventSource | null; key: string }
+  interface AnswerBody { behavior: 'allow' | 'deny'; message?: string; answers?: Record<string, string> }
+  type AnswerFn = (r: ChatRequest, body: AnswerBody, btns: HTMLButtonElement[]) => void | Promise<void>;
+  interface HttpError extends Error { status?: number }
+  /** A JSON reply of the chat API (fields depend on the route). */
+  interface ApiReply { id?: string; error?: string }
   const DS = window.DashSim; if (!DS) return;
-  const TOKEN = (document.querySelector('meta[name="chat-token"]') || {}).content || '';
-  const $ = s => document.querySelector(s);
+  const TOKEN = (document.querySelector<HTMLMetaElement>('meta[name="chat-token"]') || {} as Partial<HTMLMetaElement>).content || '';
+  const $ = (s: string) => document.querySelector<HTMLElement>(s);
   const PROPS = new Set(['value', 'checked', 'disabled', 'hidden', 'type', 'rows', 'id', 'name', 'title', 'placeholder', 'spellcheck', 'autocomplete']);
-  function h(tag, a, ...kids) {
+  function h<K extends keyof HTMLElementTagNameMap>(tag: K, a?: Record<string, unknown> | null, ...kids: Kid[]) {
     const e = document.createElement(tag);
     if (a) for (const k in a) {
       const v = a[k]; if (v == null || v === false) continue;
-      if (k === 'class') e.className = v; else if (k === 'text') e.textContent = v;
-      else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
-      else if (PROPS.has(k)) e[k] = v; else e.setAttribute(k, v === true ? '' : v);
+      if (k === 'class') e.className = v as string; else if (k === 'text') e.textContent = v as string;
+      else if (k.startsWith('on')) e.addEventListener(k.slice(2), v as EventListener);
+      else if (PROPS.has(k)) (e as unknown as Record<string, unknown>)[k] = v; else e.setAttribute(k, v === true ? '' : v as string);
     }
-    for (const c of kids.flat()) if (c != null && c !== false) e.append(c.nodeType ? c : document.createTextNode(String(c)));
+    for (const c of kids.flat()) if (c != null && c !== false) e.append((c as Node).nodeType ? c as Node : document.createTextNode(String(c)));
     return e;
   }
-  async function post(path, body) {
+  async function post(path: string, body?: object) {
     const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-chat-token': TOKEN }, body: JSON.stringify(body || {}) });
-    let j = {}; try { j = await r.json(); } catch { }
-    if (!r.ok) { const e = new Error(j.error || 'request failed (' + r.status + ')'); e.status = r.status; throw e; }
+    let j: ApiReply = {}; try { j = await r.json(); } catch { }
+    if (!r.ok) { const e: HttpError = new Error(j.error || 'request failed (' + r.status + ')'); e.status = r.status; throw e; }
     return j;
   }
-  const money = c => '$' + (+c || 0).toFixed(4);
+  const money = (c?: number) => '$' + (+c! || 0).toFixed(4);
 
   // ───────── owned sessions seen in the snapshot (flags only; text comes from the chat stream)
-  let owned = new Map();   // taskId -> {task, project}
-  let needy = [];          // owned tasks with a pending request
-  let wantFocus = null;    // session id we should open once it shows up on the floor
+  let owned = new Map<string, { task: Task; project: Project }>();   // taskId -> {task, project}
+  let needy: Task[] = [];          // owned tasks with a pending request
+  let wantFocus: string | null = null;    // session id we should open once it shows up on the floor
   let wantFocusAt = 0;
-  const taskOfDetail = d => {
+  const taskOfDetail = (d: Detail) => {
     if (!d) return null;
     if (d.kind === 'task') return d.id;
     if (d.kind === 'agent') { const a = DS.agents().find(x => x.id === d.id); return a ? a.taskId : null; }
@@ -60,8 +86,8 @@
   kpi()?.addEventListener('click', () => { if (needy[0]) openSession(needy[0].id); });
   kpi()?.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && needy[0]) { e.preventDefault(); openSession(needy[0].id); } });
 
-  function openSession(id) { wantFocus = id; wantFocusAt = Date.now(); tryWanted(true); }
-  function tryWanted(force) {
+  function openSession(id: string) { wantFocus = id; wantFocusAt = Date.now(); tryWanted(true); }
+  function tryWanted(force?: boolean) {
     if (!wantFocus) return;
     if (Date.now() - wantFocusAt > 60e3) { wantFocus = null; return; }
     if (!owned.has(wantFocus)) return;
@@ -87,18 +113,18 @@
   input.setAttribute('role', 'combobox'); input.setAttribute('aria-autocomplete', 'list'); input.setAttribute('aria-controls', 'chat-cmds'); input.setAttribute('aria-expanded', 'false');
   let cmdSel = -1;
   function cmdItems() { return [...cmdList.children]; }
-  function cmdMark(i) {
+  function cmdMark(i: number) {
     const it = cmdItems(); if (!it.length) return;
     cmdSel = (i + it.length) % it.length;
     it.forEach((li, k) => li.setAttribute('aria-selected', String(k === cmdSel)));
     input.setAttribute('aria-activedescendant', it[cmdSel].id); it[cmdSel].scrollIntoView({ block: 'nearest' });
   }
   function cmdClose() { cmdList.hidden = true; cmdNote.hidden = true; cmdSel = -1; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); }
-  function cmdPick(name) { input.value = '/' + name + ' '; cmdClose(); input.focus(); input.dispatchEvent(new Event('input')); }
+  function cmdPick(name: string) { input.value = '/' + name + ' '; cmdClose(); input.focus(); input.dispatchEvent(new Event('input')); }
   function cmdUpdate() {
     const mt = /^\/([^\s]*)$/.exec(input.value);
     if (!mt || !cur || input.disabled) return cmdClose();
-    const note = t => { cmdList.hidden = true; input.setAttribute('aria-expanded', 'false'); cmdNote.textContent = t; cmdNote.hidden = false; };
+    const note = (t: string) => { cmdList.hidden = true; input.setAttribute('aria-expanded', 'false'); cmdNote.textContent = t; cmdNote.hidden = false; };
     if (cur.mode === 'peer') return note('Slash commands run only inside that session. From here this is sent as a plain message.');
     const all = cur.meta && cur.meta.commands;
     if (!all) return note('Commands load once the session has started.');
@@ -106,7 +132,7 @@
     const hits = all.filter(n => n.toLowerCase().startsWith(q)).concat(q ? all.filter(n => !n.toLowerCase().startsWith(q) && n.toLowerCase().includes(q)) : []).slice(0, 300);
     if (!hits.length) return note('No command matches /' + mt[1] + '.');
     cmdNote.hidden = true;
-    cmdList.replaceChildren(...hits.map((n, k) => h('li', { id: 'chat-cmd-' + k, role: 'option', 'aria-selected': 'false', text: '/' + n, onmousedown: ev => { ev.preventDefault(); cmdPick(n); } })));
+    cmdList.replaceChildren(...hits.map((n, k) => h('li', { id: 'chat-cmd-' + k, role: 'option', 'aria-selected': 'false', text: '/' + n, onmousedown: (ev: MouseEvent) => { ev.preventDefault(); cmdPick(n); } })));
     cmdList.hidden = false; input.setAttribute('aria-expanded', 'true'); cmdMark(0);
   }
   input.addEventListener('input', cmdUpdate);
@@ -114,14 +140,16 @@
   const form = h('div', { class: 'chat-in' }, cmdList, cmdNote, input, sendBtn);
   const nowCb = h('input', { type: 'checkbox', id: 'chat-now' });
   const nowWrap = h('label', { class: 'chat-now', hidden: true }, nowCb, 'Send now (interrupts)');
-  const NOTE = { owned: 'Dashboard-started session. Messages stay on this machine.', peer: 'Terminal or desktop session. Your messages arrive as from a teammate; approvals stay in the permission cards.' };
+  const NOTE: Record<ChatMode, string> = { owned: 'Dashboard-started session. Messages stay on this machine.', peer: 'Terminal or desktop session. Your messages arrive as from a teammate; approvals stay in the permission cards.',
+    agent: 'Subagent screen, read-only: its own text and tool names. To message the session, open its main agent.' };
+  const isOffice = () => document.body.classList.contains('v-office'); // office view: a subagent's desk shows its own screen (server.js /api/agent/*); asked late, index.html sets the class after this script loads
   const noteEl = h('div', { class: 'chat-note', text: NOTE.owned });
   const panel = h('section', { id: 'chat', class: 'chat', 'aria-label': 'Session chat', hidden: true }, head, logEl, pendEl, errEl, form, nowWrap, noteEl);
   detailEl?.append(panel);
   input.addEventListener('keydown', e => {
     if (!cmdList.hidden && !e.isComposing) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); e.stopPropagation(); cmdMark(cmdSel + (e.key === 'ArrowDown' ? 1 : -1)); return; }
-      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') { const li = cmdItems()[cmdSel]; if (li) { e.preventDefault(); e.stopPropagation(); cmdPick(li.textContent.slice(1)); return; } }
+      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') { const li = cmdItems()[cmdSel]; if (li) { e.preventDefault(); e.stopPropagation(); cmdPick(li.textContent!.slice(1)); return; } }
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cmdClose(); return; }
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); cmdClose(); send(); }
@@ -130,44 +158,47 @@
   });
   input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(120, input.scrollHeight) + 'px'; });
 
-  let cur = null;           // {id, mode: 'owned'|'peer', es, meta, pendKey, last, ro}
+  let cur: ChatCur | null = null;           // {id, mode: 'owned'|'peer'|'agent', es, meta, pendKey, last, ro}; agent: id is the subagent id, read-only
   let focusOnReady = false;
   function closeStream() { if (cur && cur.es) cur.es.close(); cur = null; }
-  function showFor(id, mode = 'owned') {
+  function showFor(id: string | null, mode: ChatMode = 'owned') {
     if (!id) { panel.hidden = true; detailEl?.classList.remove('has-chat'); closeStream(); return; }
     panel.hidden = false; detailEl?.classList.add('has-chat');
     if (cur && cur.id === id && cur.mode === mode) { maybeFocus(); return; }
     closeStream(); logEl.replaceChildren(); pendEl.replaceChildren(); errEl.textContent = ''; cmdClose();
-    const peer = mode === 'peer';
-    stopBtn.hidden = peer; nowWrap.hidden = !peer; nowCb.checked = false; noteEl.textContent = NOTE[mode]; headCost.textContent = '';
+    const peer = mode === 'peer', agent = mode === 'agent'; // agent: read-only, nothing to send, stop or answer
+    stopBtn.hidden = peer || agent; nowWrap.hidden = !peer; form.hidden = agent; nowCb.checked = false; noteEl.textContent = NOTE[mode]; headCost.textContent = ''; headSkip.hidden = true;
+    panel.setAttribute('aria-label', agent ? 'Subagent screen (read-only)' : 'Session chat'); logEl.setAttribute('aria-label', agent ? 'Subagent screen log' : 'Chat log');
     input.disabled = sendBtn.disabled = true; input.placeholder = 'Message, Enter to send, Shift+Enter for a new line';
-    const c = cur = { id, mode, es: null, meta: null, pendKey: '', last: 0 };
-    const es = c.es = new EventSource(`/api/${peer ? 'peer' : 'chat'}/${encodeURIComponent(id)}/stream?token=${encodeURIComponent(TOKEN)}`);
-    es.addEventListener('init', e => { if (cur !== c) return; const d = JSON.parse(e.data); logEl.replaceChildren(); c.last = 0; for (const x of d.log) addLog(x); c.meta = d.meta; c.pendKey = ''; paint(); scrollDown(true); maybeFocus(); });
+    const c: ChatCur = cur = { id, mode, es: null, meta: null, pendKey: '', last: 0 };
+    const es = c.es = new EventSource(`/api/${agent ? 'agent' : peer ? 'peer' : 'chat'}/${encodeURIComponent(id)}/stream?token=${encodeURIComponent(TOKEN)}`);
+    es.addEventListener('init', e => { if (cur !== c) return; const d: { meta: ChatMeta; log: LogEntry[] } = JSON.parse(e.data); logEl.replaceChildren(); c.last = 0; c.meta = d.meta; for (const x of d.log) addLog(x);
+      if (agent && !d.log.length) logEl.append(h('div', { class: 'chat-empty', text: 'Nothing on this screen yet.' }));
+      c.pendKey = ''; paint(); scrollDown(true); maybeFocus(); });
     es.addEventListener('entry', e => { if (cur !== c) return; addLog(JSON.parse(e.data)); });
     es.addEventListener('meta', e => {
-      if (cur !== c) return; const m = JSON.parse(e.data);
+      if (cur !== c) return; const m: ChatMeta = JSON.parse(e.data);
       c.meta = m; paint(); maybeFocus(); if (document.activeElement === input) cmdUpdate();
     });
-    es.onerror = () => { if (cur === c && es.readyState === 2) { errEl.textContent = peer ? 'Chat stream closed.' : 'Chat stream closed. This session is no longer tracked by the dashboard.'; } };
+    es.onerror = () => { if (cur === c && es.readyState === 2) { errEl.textContent = agent ? 'Screen stream closed.' : peer ? 'Chat stream closed.' : 'Chat stream closed. This session is no longer tracked by the dashboard.'; } };
   }
   const reopen = () => { if (cur) { const { id, mode } = cur; closeStream(); showFor(id, mode); } };
   function maybeFocus() {
     if (!focusOnReady || panel.hidden || !cur || !cur.meta) return;
-    focusOnReady = false;
-    const b = pendEl.querySelector('input,button'); (b || input).focus({ preventScroll: false });
+    focusOnReady = false; if (cur.mode === 'agent') return;
+    const b = pendEl.querySelector<HTMLElement>('input,button'); (b || input).focus({ preventScroll: false });
   }
   function nearBottom() { return logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40; }
-  function scrollDown(force) { if (force || nearBottom()) logEl.scrollTop = logEl.scrollHeight; }
-  function addLog(x) {
+  function scrollDown(force?: boolean) { if (force || nearBottom()) logEl.scrollTop = logEl.scrollHeight; }
+  function addLog(x: LogEntry) {
     if (x.i <= (cur ? cur.last : 0)) return; if (cur) cur.last = x.i;
-    const stick = nearBottom(); let el;
+    const stick = nearBottom(); let el: HTMLElement;
     const peer = cur && cur.mode === 'peer';
     if (x.kind === 'user') el = h('div', { class: 'cm user' }, h('small', { text: peer ? 'You (in session)' : 'You' }), x.text);
     else if (x.kind === 'peer') el = h('div', { class: 'cm user peer' + (x.via === 'dashboard' ? '' : ' other') }, h('small', { text: x.via === 'dashboard' ? 'You (dashboard)' : 'Another session' }), x.text);
     else if (x.kind === 'held') el = h('div', { class: 'cm user peer held' }, h('small', { text: 'Held by the session, not delivered' }), x.text,
       h('em', { text: 'This session runs without permission prompts, so Claude Code holds messages from outside. Review it in that session, or set "crossSessionInbound" to "accept" in its settings.' }));
-    else if (x.kind === 'assistant') el = h('div', { class: 'cm assistant' }, h('small', { text: 'Claude' }), x.text);
+    else if (x.kind === 'assistant') el = h('div', { class: 'cm assistant' }, h('small', { text: cur && cur.mode === 'agent' ? (cur.meta && cur.meta.label) || 'Subagent' : 'Claude' }), x.text);
     else if (x.kind === 'tool') el = h('div', { class: 'cl tool' }, h('b', { text: '▸ ' + x.name }), x.text);
     else if (x.kind === 'request') el = h('div', { class: 'cl request' }, h('b', { text: '? ' + x.name }), x.text);
     else if (x.kind === 'answer') el = h('div', { class: 'cl answer' }, h('b', { text: '✓ ' + x.name }), x.text);
@@ -178,8 +209,13 @@
   }
   function paint() {
     const m = cur && cur.meta; if (!m) return;
-    headSkip.hidden = !(cur.mode === 'owned' && m.skipPermissions);
-    if (cur.mode === 'peer') {
+    headSkip.hidden = !(cur!.mode === 'owned' && m.skipPermissions);
+    if (cur!.mode === 'agent') { // meta: {role, label, status, sessionId}
+      head.dataset.s = m.status === 'running' ? 'busy' : m.status === 'waiting' ? 'idle' : 'ended';
+      headTxt.textContent = (m.label || 'Subagent') + ' · ' + ({ running: 'Working…', waiting: 'Waiting', done: 'Finished', failed: 'Failed' }[m.status as 'running' | 'waiting' | 'done' | 'failed'] || m.status || '');
+      return;
+    }
+    if (cur!.mode === 'peer') {
       const ro = m.live === false ? 'Session closed: read-only' : m.canSend === false ? 'Sending is not available for this session right now: read-only' : ''; // the server's meta is the only lock
       head.dataset.s = m.live === false ? 'ended' : m.status === 'busy' ? 'busy' : m.status === 'waiting' ? 'ask' : 'idle';
       headTxt.textContent = m.live === false ? 'Closed' : m.status === 'busy' ? 'Working…' : m.status === 'waiting' ? 'Needs you' : 'Idle';
@@ -187,14 +223,14 @@
       input.placeholder = ro || 'Message, Enter to send, Shift+Enter for a new line';
       return;
     }
-    const asking = m.pending.length > 0;
+    const asking = m.pending!.length > 0;
     head.dataset.s = !m.alive ? 'ended' : asking ? 'ask' : m.busy ? 'busy' : 'idle';
     headTxt.textContent = !m.alive ? 'Ended' : asking ? 'Needs you' : m.busy ? 'Working…' : 'Your turn';
     headCost.textContent = m.cost ? money(m.cost) : '';
     stopBtn.disabled = !m.alive; input.disabled = !m.alive; sendBtn.disabled = !m.alive;
     if (!m.alive) input.placeholder = 'Session ended';
-    const key = m.pending.map(r => r.request_id).join(',');
-    if (key !== cur.pendKey) { cur.pendKey = key; pendEl.replaceChildren(...m.pending.map(renderPending)); }
+    const key = m.pending!.map(r => r.request_id).join(',');
+    if (key !== cur!.pendKey) { cur!.pendKey = key; pendEl.replaceChildren(...m.pending!.map(renderPending)); }
   }
   async function send() {
     const text = input.value.trim(); if (!text || !cur || sendBtn.disabled) return;
@@ -204,7 +240,7 @@
       if (peer) await post(`/api/peer/${encodeURIComponent(c.id)}/send`, { text, priority: nowCb.checked ? 'now' : 'next' });
       else await post(`/api/chat/${encodeURIComponent(c.id)}/send`, { text });
       input.value = ''; input.style.height = ''; nowCb.checked = false;
-    } catch (e) { errEl.textContent = e.message; } // a 502 locks via the server's meta push; a 404 only shows the error
+    } catch (e) { errEl.textContent = (e as Error).message; } // a 502 locks via the server's meta push; a 404 only shows the error
     finally {
       if (cur === c && peer) paint();
       else if (cur && cur.meta && cur.meta.alive) sendBtn.disabled = false;
@@ -213,18 +249,18 @@
   }
   async function stop() {
     if (!cur) return; errEl.textContent = ''; stopBtn.disabled = true;
-    try { await post(`/api/chat/${encodeURIComponent(cur.id)}/stop`); } catch (e) { errEl.textContent = e.message; stopBtn.disabled = false; }
+    try { await post(`/api/chat/${encodeURIComponent(cur.id)}/stop`); } catch (e) { errEl.textContent = (e as Error).message; stopBtn.disabled = false; }
   }
-  async function answer(r, body, btns) {
+  async function answer(r: ChatRequest, body: AnswerBody, btns: HTMLButtonElement[]) {
     errEl.textContent = ''; btns.forEach(b => { b.disabled = true; });
-    try { await post(`/api/chat/${encodeURIComponent(cur.id)}/answer`, Object.assign({ request_id: r.request_id }, body)); input.focus(); }
-    catch (e) { errEl.textContent = e.message; btns.forEach(b => { b.disabled = false; }); }
+    try { await post(`/api/chat/${encodeURIComponent(cur!.id)}/answer`, Object.assign({ request_id: r.request_id }, body)); input.focus(); }
+    catch (e) { errEl.textContent = (e as Error).message; btns.forEach(b => { b.disabled = false; }); }
   }
 
-  function renderPending(r) {
+  function renderPending(r: ChatRequest) {
     return r.tool_name === 'AskUserQuestion' && Array.isArray(r.questions) && r.questions.length ? renderAsk(r) : renderPerm(r);
   }
-  function renderPerm(r, doAnswer = answer, withMsg = false) {
+  function renderPerm(r: ChatRequest, doAnswer: AnswerFn = answer, withMsg = false) {
     const allow = h('button', { class: 'cb-btn allow', type: 'button', text: 'Allow', 'aria-label': `Allow ${r.display_name}` });
     const deny = h('button', { class: 'cb-btn bad', type: 'button', text: 'Deny', 'aria-label': `Deny ${r.display_name}` });
     const btns = [allow, deny];
@@ -239,8 +275,8 @@
       msg ? h('div', { class: 'cq-msg' }, msg) : null,
       h('div', { class: 'cq-act' }, allow, deny));
   }
-  function renderAsk(r, doAnswer = answer) {
-    const groups = r.questions.map((q, qi) => {
+  function renderAsk(r: ChatRequest, doAnswer: AnswerFn = answer) {
+    const groups = r.questions!.map((q, qi) => {
       const multi = !!q.multiSelect, name = `${r.request_id}-${qi}`, type = multi ? 'checkbox' : 'radio';
       const opts = (q.options || []).map(o => h('label', { class: 'cq-opt' }, h('input', { type, name, value: o.label }), h('span', { class: 'l', text: o.label }), o.description ? h('span', { class: 'd', text: o.description }) : null));
       const otherIn = h('input', { type: 'text', 'aria-label': `Other answer for: ${q.question}`, placeholder: 'Type your own answer', autocomplete: 'off' });
@@ -255,9 +291,9 @@
     const skip = h('button', { class: 'cb-btn bad', type: 'button', text: 'Skip', 'aria-label': 'Decline to answer' });
     const btns = [submit, skip];
     submit.addEventListener('click', () => {
-      const answers = {}; let firstBad = null;
+      const answers: Record<string, string> = {}; let firstBad: HTMLInputElement | null = null;
       for (const g of groups) {
-        const vals = [...g.fs.querySelectorAll('input[type=radio],input[type=checkbox]')].filter(i => i.checked).map(i => i.value === '__other' ? g.otherIn.value.trim() : i.value).filter(Boolean);
+        const vals = [...g.fs.querySelectorAll<HTMLInputElement>('input[type=radio],input[type=checkbox]')].filter(i => i.checked).map(i => i.value === '__other' ? g.otherIn.value.trim() : i.value).filter(Boolean);
         g.bad.textContent = '';
         if (!vals.length) { g.bad.textContent = 'Pick an option or type an answer.'; firstBad = firstBad || g.fs.querySelector('input'); continue; }
         answers[g.q.question] = g.multi ? vals.join(', ') : vals[0];
@@ -272,8 +308,8 @@
 
   // ───────── terminal/desktop sessions with a prompt the dashboard can answer through the global hook (server.js /api/ext/*)
   // The terminal shows the same prompt: first answer wins. Only tool name + a short summary come from the server.
-  let extTasks = new Map(); // taskId -> task with t.ext.pending > 0 (never owned sessions)
-  let peerTasks = new Set(); // taskIds of live terminal/desktop sessions the dashboard can message (server.js /api/peer/*)
+  let extTasks = new Map<string, Task>(); // taskId -> task with t.ext.pending > 0 (never owned sessions)
+  let peerTasks = new Set<string>(); // taskIds of live terminal/desktop sessions the dashboard can message (server.js /api/peer/*)
   const extErr = h('div', { class: 'chat-err', role: 'alert' });
   const extPend = h('div', { class: 'chat-pend', 'aria-label': 'Prompts waiting for you' });
   const extPanel = h('section', { id: 'ext-prompt', class: 'chat ext', 'aria-label': 'Prompt waiting for you', hidden: true },
@@ -281,17 +317,17 @@
     extPend, extErr,
     h('div', { class: 'chat-note', text: 'Terminal or desktop session. You can also answer there: the first answer wins, this card clears when the session moves on.' }));
   detailEl?.append(extPanel);
-  let ecur = null; // {id, es, key}
+  let ecur: ExtCur | null = null; // {id, es, key}
   function closeExt() { if (ecur && ecur.es) ecur.es.close(); ecur = null; }
-  function showExt(id) {
+  function showExt(id: string | null) {
     if (!id) { extPanel.hidden = true; if (!cur) detailEl?.classList.remove('has-chat'); closeExt(); return; }
     extPanel.hidden = false; detailEl?.classList.add('has-chat');
     if (ecur && ecur.id === id) return;
     closeExt(); extPend.replaceChildren(); extErr.textContent = '';
-    const c = ecur = { id, es: null, key: '' };
+    const c: ExtCur = ecur = { id, es: null, key: '' };
     const es = c.es = new EventSource(`/api/ext/${encodeURIComponent(id)}/stream?token=${encodeURIComponent(TOKEN)}`);
     es.addEventListener('meta', e => {
-      if (ecur !== c) return; const d = JSON.parse(e.data), key = d.pending.map(r => r.id).join(',');
+      if (ecur !== c) return; const d: { pending: ExtRequest[] } = JSON.parse(e.data), key = d.pending.map(r => r.id).join(',');
       if (key === c.key) return; c.key = key;
       extPend.replaceChildren(...d.pending.map(p => { const r = { request_id: p.id, tool_name: p.tool_name, display_name: p.tool_name, description: '', summary: p.summary, preview: '', questions: p.questions };
         return p.kind === 'ask' ? renderAsk(r, answerExt) : renderPerm(r, answerExt, true); }));
@@ -299,24 +335,25 @@
     });
     es.onerror = () => { if (ecur === c && es.readyState === 2) extErr.textContent = 'Prompt stream closed.'; };
   }
-  async function answerExt(r, body, btns) {
+  async function answerExt(r: ChatRequest, body: AnswerBody, btns: HTMLButtonElement[]) {
     extErr.textContent = ''; btns.forEach(b => { b.disabled = true; });
-    try { await post(`/api/ext/${encodeURIComponent(ecur.id)}/answer`, Object.assign({ id: r.request_id }, body)); }
-    catch (e) { extErr.textContent = e.message; btns.forEach(b => { b.disabled = false; }); }
+    try { await post(`/api/ext/${encodeURIComponent(ecur!.id)}/answer`, Object.assign({ id: r.request_id }, body)); }
+    catch (e) { extErr.textContent = (e as Error).message; btns.forEach(b => { b.disabled = false; }); }
   }
 
   // ───────── detail card hook
-  let lastDetail = null;
-  window.addEventListener('factory:detail', e => { lastDetail = e.detail || null; refreshDetail(); });
+  let lastDetail: Detail = null;
+  window.addEventListener('factory:detail', e => { lastDetail = (e as CustomEvent<Detail>).detail || null; refreshDetail(); });
   function refreshDetail() {
     const id = taskOfDetail(lastDetail), isOwned = !!(id && owned.has(id));
     const isPeer = !isOwned && !!id && (peerTasks.has(id) || (cur && cur.mode === 'peer' && cur.id === id));
-    showFor(isOwned || isPeer ? id : null, isPeer ? 'peer' : 'owned');
+    const sub = isOffice() && lastDetail && lastDetail.kind === 'agent' && /^a-/.test(lastDetail.id) ? lastDetail.id : null; // office view: a subagent shows its own screen
+    if (sub) showFor(sub, 'agent'); else showFor(isOwned || isPeer ? id : null, isPeer ? 'peer' : 'owned');
     showExt(!isOwned && id && extTasks.has(id) ? id : null); updateAlert();
   }
 
   // ───────── New session dialog
-  const LS = { get: k => { try { return localStorage.getItem(k) || ''; } catch { return ''; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { } } };
+  const LS = { get: (k: string) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { } } };
   const projSel = h('select', { id: 'cn-proj', 'aria-label': 'Project' });
   const pathIn = h('input', { id: 'cn-path', type: 'text', placeholder: 'C:\\path\\to\\folder', autocomplete: 'off', spellcheck: 'false' });
   const browseBtn = h('button', { class: 'cb-btn cn-browse', type: 'button', text: 'Browse…', 'aria-expanded': 'false', 'aria-controls': 'cn-fb' });
@@ -329,14 +366,14 @@
   const fbMsg = h('div', { class: 'cn-fb-msg' });
   const fb = h('div', { id: 'cn-fb', class: 'cn-fb', hidden: true }, h('div', { class: 'cn-fb-bar' }, fbUp, fbCur, fbUse), fbList, fbMsg);
   let fbPath = '', fbParent = '', fbSeq = 0;
-  async function fbLoad(p) {
+  async function fbLoad(p: string): Promise<void> {
     const seq = ++fbSeq; fbMsg.textContent = 'Loading…';
-    let j;
+    let j: { error?: string; path?: string; parent?: string; dirs: string[]; roots: string[] };
     try {
       const r = await fetch('/api/fs/dirs' + (p ? '?path=' + encodeURIComponent(p) : ''), { headers: { 'x-chat-token': TOKEN } });
       j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || 'cannot open that folder');
-    } catch (e) { if (seq !== fbSeq) return; if (p) return fbLoad(''); fbMsg.textContent = e.message; return; }
+    } catch (e) { if (seq !== fbSeq) return; if (p) return fbLoad(''); fbMsg.textContent = (e as Error).message; return; }
     if (seq !== fbSeq) return;
     fbPath = j.path || ''; fbParent = j.parent || '';
     fbCur.textContent = fbPath || 'Choose a starting point';
@@ -345,11 +382,11 @@
     fbList.replaceChildren(...items.map(n => h('li', null, h('button', { type: 'button', text: n, onclick: () => fbLoad(fbPath ? fbPath.replace(/[\\/]+$/, '') + (fbPath.includes('\\') ? '\\' : '/') + n : n) }))));
     fbMsg.textContent = items.length ? '' : 'No subfolders here.';
   }
-  function fbToggle(open) {
+  function fbToggle(open: boolean) {
     fb.hidden = !open; browseBtn.setAttribute('aria-expanded', String(open));
     if (open) { const v = pathIn.value.trim(); fbLoad(/^([a-zA-Z]:[\\/]|\/)/.test(v) ? v : ''); }
   }
-  browseBtn.addEventListener('click', () => fbToggle(fb.hidden));
+  browseBtn.addEventListener('click', () => fbToggle(fb.hidden as boolean));
   fbUp.addEventListener('click', () => fbLoad(fbParent));
   fbUse.addEventListener('click', () => { if (!fbPath) return; pathIn.value = fbPath; syncSel(); fbToggle(false); pathIn.focus(); });
   const modelSel = h('select', { id: 'cn-model', 'aria-label': 'Model' }, [['', 'Default'], ['haiku', 'Haiku'], ['sonnet', 'Sonnet'], ['opus', 'Opus']].map(([v, l]) => h('option', { value: v, text: l })));
@@ -369,7 +406,7 @@
   const cnErr = h('div', { class: 'cn-err', role: 'alert' });
   const goBtn = h('button', { class: 'cb-btn pri', type: 'submit', text: 'Start session' });
   const cancelBtn = h('button', { class: 'cb-btn', type: 'button', text: 'Cancel' });
-  const lab = (t, el) => h('label', { text: undefined }, t, el);
+  const lab = (t: string, el: Node) => h('label', { text: undefined }, t, el);
   const formEl = h('form', { class: 'cn-f', method: 'dialog', novalidate: true },
     lab('Project', projSel), pathWrap, fb,
     h('div', { class: 'cn-row' }, lab('Model', modelSel), lab('Effort', effortSel)),
@@ -390,11 +427,11 @@
   }
   promptIn.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); formEl.requestSubmit(); } });
   function fillProjects() {
-    const seen = new Set(), opts = [];
+    const seen = new Set<string>(), opts: HTMLOptionElement[] = [];
     for (const p of DS.state.projects) if (p.cwd && !seen.has(p.cwd)) { seen.add(p.cwd); opts.push(h('option', { value: p.cwd, text: `${p.name}  ·  ${p.cwd}` })); }
     opts.push(h('option', { value: '__other', text: 'Other path…' }));
     projSel.replaceChildren(...opts);
-    const want = (lastDetail && (() => { const t = taskOfDetail(lastDetail); for (const p of DS.state.projects) if (p.tasks.some(x => x.id === t)) return p.cwd; if (lastDetail.kind === 'project') return (DS.state.projects.find(p => p.id === lastDetail.id) || {}).cwd; })()) || LS.get('chat.cwd');
+    const want = (lastDetail && (() => { const t = taskOfDetail(lastDetail); for (const p of DS.state.projects) if (p.tasks.some(x => x.id === t)) return p.cwd; if (lastDetail!.kind === 'project') return (DS.state.projects.find(p => p.id === lastDetail!.id) || {} as Partial<Project>).cwd; })()) || LS.get('chat.cwd');
     projSel.value = want && seen.has(want) ? want : opts.length > 1 ? opts[0].value : '__other';
     pathIn.value = projSel.value === '__other' ? LS.get('chat.path') : projSel.value;
     fbToggle(false);
@@ -413,34 +450,34 @@
     try {
       const r = await post('/api/chat/start', { cwd, model: modelSel.value, effort: effortSel.value, prompt, skipPermissions: skipCb.checked });
       LS.set('chat.cwd', projSel.value === '__other' ? '' : cwd); LS.set('chat.path', projSel.value === '__other' ? cwd : ''); LS.set('chat.model', modelSel.value); LS.set('chat.effort', effortSel.value);
-      promptIn.value = ''; dlg.close(); openSession(r.id);
-    } catch (err) { cnErr.textContent = err.message; goBtn.disabled = false; syncSkip(); }
+      promptIn.value = ''; dlg.close(); openSession(r.id!);
+    } catch (err) { cnErr.textContent = (err as Error).message; goBtn.disabled = false; syncSkip(); }
   });
   const newBtn = h('button', { id: 'chat-new', class: 'chat-new', type: 'button', 'aria-haspopup': 'dialog', onclick: openDialog }, h('span', { 'aria-hidden': 'true' }), 'New session');
-  newBtn.firstChild.innerHTML = '<svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>';
+  (newBtn.firstChild as HTMLElement).innerHTML = '<svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>';
   // Refresh: hard refresh of the data and connections, not the page (server rescans now; every open stream reopens)
   const refBtn = h('button', { id: 'chat-refresh', class: 'chat-new chat-ref', type: 'button', title: 'Rescan sessions and reconnect (keeps the page)', 'aria-label': 'Refresh data and connections' }, h('span', { 'aria-hidden': 'true' }), h('span', { class: 'lbl', text: 'Refresh' }));
-  refBtn.firstChild.innerHTML = '<svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M10.2 4.2A4.5 4.5 0 1 0 10.5 7.5M10.5 1.5v3h-3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>';
+  (refBtn.firstChild as HTMLElement).innerHTML = '<svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M10.2 4.2A4.5 4.5 0 1 0 10.5 7.5M10.5 1.5v3h-3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>';
   refBtn.addEventListener('click', async () => {
     if (refBtn.disabled) return;
-    const lbl = refBtn.querySelector('.lbl'); refBtn.disabled = true; lbl.textContent = 'Refreshing…'; refBtn.removeAttribute('data-err');
+    const lbl = refBtn.querySelector('.lbl')!; refBtn.disabled = true; lbl.textContent = 'Refreshing…'; refBtn.removeAttribute('data-err');
     try {
       await post('/api/refresh');
       DS.reconnect();
       reopen();
       if (ecur) { const id = ecur.id; closeExt(); showExt(id); }
       lbl.textContent = 'Refreshed';
-    } catch (e) { lbl.textContent = 'Refresh failed'; refBtn.dataset.err = ''; refBtn.title = e.message; }
+    } catch (e) { lbl.textContent = 'Refresh failed'; refBtn.dataset.err = ''; refBtn.title = (e as Error).message; }
     setTimeout(() => { lbl.textContent = 'Refresh'; refBtn.disabled = false; }, 1200);
   });
   const acts = h('div', { class: 'chat-acts' }, newBtn, refBtn);
   (() => { const w = $('#win'); if (w) w.insertAdjacentElement('afterend', acts); else document.body.append(acts); })();
   DS.subscribe(state => {
-    const m = new Map(); const n = [];
+    const m = new Map<string, { task: Task; project: Project }>(); const n: Task[] = [];
     for (const p of state.projects) for (const t of p.tasks) if (t.owned) { m.set(t.id, { task: t, project: p }); if (t.chat && t.chat.pending > 0) n.push(t); }
-    const x = new Map(); for (const p of state.projects) for (const t of p.tasks) if (!t.owned && t.ext && t.ext.pending > 0) x.set(t.id, t);
+    const x = new Map<string, Task>(); for (const p of state.projects) for (const t of p.tasks) if (!t.owned && t.ext && t.ext.pending > 0) x.set(t.id, t);
     extTasks = x;
-    const pt = new Set(); for (const p of state.projects) for (const t of p.tasks) if (!t.owned && t.peer && t.peer.live) pt.add(t.id);
+    const pt = new Set<string>(); for (const p of state.projects) for (const t of p.tasks) if (!t.owned && t.peer && t.peer.live) pt.add(t.id);
     peerTasks = pt;
     owned = m; needy = n; updateAlert(); tryWanted(); refreshDetail();
   });

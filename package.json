@@ -1,1 +1,1 @@
-{ "name": "claude-factory-live", "private": true, "type": "commonjs", "scripts": { "test": "node --test \"test/*.test.js\"" } }
+{"name":"claude-factory-live","private":true,"type":"commonjs","scripts":{"build":"node scripts/build.js","typecheck":"tsc --noEmit -p tsconfig.json","prestart":"npm run build","start":"node server.js","pretest":"npm run build","test":"node --test \"test/*.test.js\""},"devDependencies":{"@types/three":"0.160.0","typescript":"6.0.3"}}

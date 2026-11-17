@@ -6,66 +6,79 @@
  */
 (function () {
   'use strict';
+  type Agent = import('./common/types.js').Agent;
+  type DashState = import('./common/types.js').DashState;
+  type ModelInfo = import('./common/types.js').ModelInfo;
+  type ModelSpec = import('./common/types.js').ModelSpec;
+  type RoleInfo = import('./common/types.js').RoleInfo;
+  type EffortInfo = import('./common/types.js').EffortInfo;
+  type Conn = import('./common/types.js').Conn;
+  type HistoryPoint = import('./common/types.js').HistoryPoint;
+  type Totals = import('./common/types.js').Totals;
+  type Group = import('./common/types.js').Group;
+  type Fmt = import('./common/types.js').Fmt;
+  type Subscriber = import('./common/types.js').Subscriber;
+  type Snapshot = import('./common/types.js').Snapshot;
   // ── palettes (validated with dataviz validate_palette.js, dark mode, surface #1a1a19)
   // Roles: categorical, fixed order for known roles, stable hash for the rest. "main" = neutral ivory.
   const ROLE_PAL = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#0ca30c', '#9085e9', '#e66767', '#1f9fb0', '#b8702e'];
   const ROLE_ORDER = ['frontend-engineer', 'backend-engineer', 'qa', 'code-reviewer', 'architect', 'devops', 'ui-ux-designer', 'security', 'writer', 'general-purpose'];
-  const ROLE_FIXED = { main: '#d8d3c8', Explore: '#1f9fb0', Plan: '#9085e9', fork: '#8f8a80' };
+  const ROLE_FIXED: Record<string, string> = { main: '#d8d3c8', Explore: '#1f9fb0', Plan: '#9085e9', fork: '#8f8a80' };
   // Models: one hue per family (validated set), version shifts lightness a little.
-  const FAMILY = { opus: '#d8604b', sonnet: '#4f8fe6', haiku: '#2e9e68', fable: '#9a7cf0', mythos: '#d55181', other: '#7d8590' };
-  const SPEED = { haiku: 1.5, sonnet: 1.2, opus: 1, fable: .9, mythos: .85, other: 1 };
-  // Effort: sequential single hue (signal yellow), dim -> bright, in fixed order.
-  const EFFORTS = [
-    { id: 'low', label: 'Low', color: '#6b5c22' },
-    { id: 'medium', label: 'Medium', color: '#a38a24' },
-    { id: 'high', label: 'High', color: '#d6b425' },
-    { id: 'xhigh', label: 'X-high', color: '#f3d54a' },
-    { id: 'max', label: 'Max', color: '#fff1a8' },
+  const FAMILY: Record<string, string> = { opus: '#d8604b', sonnet: '#4f8fe6', haiku: '#2e9e68', fable: '#9a7cf0', mythos: '#d55181', other: '#7d8590' };
+  const SPEED: Record<string, number> = { haiku: 1.5, sonnet: 1.2, opus: 1, fable: .9, mythos: .85, other: 1 };
+  // Effort: one distinct colour per level, in fixed order: low soft yellow, medium green, high orange, xhigh purple, max black.
+  const EFFORTS: EffortInfo[] = [
+    { id: 'low', label: 'Low', color: '#f2e08a' },     // soft yellow
+    { id: 'medium', label: 'Medium', color: '#3fae5a' }, // green
+    { id: 'high', label: 'High', color: '#f08a24' },     // orange (red stays "failed" and blue "needs you" on office screens)
+    { id: 'xhigh', label: 'X-high', color: '#9b5de5' },  // purple
+    { id: 'max', label: 'Max', color: '#111111' },       // black (swatches get a faint outline in app.css so it shows on the dark cards)
   ];
-  const EFFORT_DEFAULT = { id: 'default', label: 'Default', color: '#8a8679' };
+  const EFFORT_DEFAULT: EffortInfo = { id: 'default', label: 'Default', color: '#8a8679' };
 
-  const hash = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
-  const ROLES = {};
-  function roleColor(role) {
+  const hash = (s: string) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
+  const ROLES: Record<string, RoleInfo> = {};
+  function roleColor(role?: string | null) {
     role = role || 'agent';
     if (ROLES[role]) return ROLES[role].color;
     let c = ROLE_FIXED[role];
     if (!c) { const i = ROLE_ORDER.indexOf(role); c = ROLE_PAL[i >= 0 ? i : hash(role) % ROLE_PAL.length]; }
     ROLES[role] = { id: role, label: role, color: c }; return c;
   }
-  const effortInfo = e => EFFORTS.find(x => x.id === String(e || '').toLowerCase()) || Object.assign({}, EFFORT_DEFAULT, e && e !== 'default' ? { id: e, label: e } : {});
-  const effortColor = e => effortInfo(e).color;
-  function shade(hex, k) { // k>0 lighter, k<0 darker
+  const effortInfo = (e?: string | null): EffortInfo => EFFORTS.find(x => x.id === String(e || '').toLowerCase()) || Object.assign({}, EFFORT_DEFAULT, e && e !== 'default' ? { id: e, label: e } : {});
+  const effortColor = (e?: string | null) => effortInfo(e).color;
+  function shade(hex: string, k: number) { // k>0 lighter, k<0 darker
     const n = parseInt(hex.slice(1), 16); let r = n >> 16, g = n >> 8 & 255, b = n & 255;
     const t = k > 0 ? 255 : 0, f = Math.abs(k); r = Math.round(r + (t - r) * f); g = Math.round(g + (t - g) * f); b = Math.round(b + (t - b) * f);
     return '#' + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
   }
-  const MODELS = {};
-  function ensureModel(id, info) {
+  const MODELS: Record<string, ModelInfo> = {};
+  function ensureModel(id: string, info?: ModelSpec) {
     if (MODELS[id]) return MODELS[id];
     info = info || {}; const fam = info.family || 'other';
-    const v = parseFloat(info.version) || 0;
+    const v = parseFloat(info.version as string) || 0;
     // newer version = slightly lighter; keeps family hue
     const k = fam === 'other' ? 0 : Math.max(-.18, Math.min(.12, (v - 5) * .12));
     MODELS[id] = { id, label: info.label || id, family: fam, color: shade(FAMILY[fam] || FAMILY.other, k), speed: SPEED[fam] || 1, priced: info.priced !== false, ctxWindow: info.ctxWindow || 1e6 };
     return MODELS[id];
   }
-  const modelColor = id => ensureModel(id).color;
+  const modelColor = (id: string) => ensureModel(id).color;
   const PROJ_PAL = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#0ca30c', '#9085e9', '#e66767', '#1f9fb0', '#b8702e'];
 
   // ── state
-  const state = { projects: [], events: [], now: Date.now(), startedAt: Date.now(), hours: 24, loading: true, ready: false };
-  const history = [];
-  const subs = new Set();
-  const seenEv = new Set();
-  let flat = [];
-  const conn = { status: 'connecting', lastAt: 0 };
-  let es = null;
-  let hours = +(new URLSearchParams(location.search).get('hours')) || +(safeGet('factory.hours')) || 24;
-  function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
-  function safeSet(k, v) { try { localStorage.setItem(k, v); } catch { } }
+  const state: DashState = { projects: [], events: [], now: Date.now(), startedAt: Date.now(), hours: 24, loading: true, ready: false };
+  const history: HistoryPoint[] = [];
+  const subs = new Set<Subscriber>();
+  const seenEv = new Set<string>();
+  let flat: Agent[] = [];
+  const conn: Conn = { status: 'connecting', lastAt: 0 };
+  let es: EventSource | null = null;
+  let hours = +(new URLSearchParams(location.search).get('hours')!) || +(safeGet('factory.hours')!) || 24;
+  function safeGet(k: string) { try { return localStorage.getItem(k); } catch { return null; } }
+  function safeSet(k: string, v: string) { try { localStorage.setItem(k, v); } catch { } }
 
-  function ingest(s) {
+  function ingest(s: Snapshot) {
     for (const id in s.models) ensureModel(id, s.models[id]);
     const projects = s.projects.map(p => {
       const color = PROJ_PAL[hash(p.id) % PROJ_PAL.length];
@@ -80,32 +93,32 @@
     conn.status = 'live'; conn.lastAt = Date.now();
     for (const fn of subs) { try { fn(state, fresh); } catch (e) { console.error(e); } }
   }
-  function connect(keepSeen) {
+  function connect(keepSeen?: boolean) {
     if (es) es.close();
     conn.status = 'connecting'; if (!keepSeen) seenEv.clear();
     es = new EventSource('/api/stream?hours=' + encodeURIComponent(hours));
     es.onmessage = e => { try { ingest(JSON.parse(e.data)); } catch (err) { console.error('bad snapshot', err); } };
-    es.onerror = () => { conn.status = es.readyState === 2 ? 'offline' : 'reconnecting'; for (const fn of connSubs) fn(conn); };
+    es.onerror = () => { conn.status = es!.readyState === 2 ? 'offline' : 'reconnecting'; for (const fn of connSubs) fn(conn); };
     es.onopen = () => { conn.status = 'live'; for (const fn of connSubs) fn(conn); };
   }
-  const connSubs = new Set();
+  const connSubs = new Set<(c: Conn) => void>();
 
   // ── aggregations (same shapes as DashSim)
   const agents = () => flat;
   function totals() {
-    const T = { tokens: 0, input: 0, output: 0, cache: 0, cacheWrite: 0, cacheRead: 0, cost: 0, costKnown: true, running: 0, queued: 0, waiting: 0, done: 0, failed: 0, agents: 0, tasks: 0, projects: state.projects.length, toolCalls: 0, needs: 0, needReasons: {} };
+    const T: Totals = { tokens: 0, input: 0, output: 0, cache: 0, cacheWrite: 0, cacheRead: 0, cost: 0, costKnown: true, running: 0, queued: 0, waiting: 0, done: 0, failed: 0, agents: 0, tasks: 0, projects: state.projects.length, toolCalls: 0, needs: 0, needReasons: {} };
     for (const p of state.projects) T.tasks += p.tasks.length;
     for (const a of flat) {
       T.tokens += a.tokens; T.input += a.input; T.output += a.output; T.cache += a.cache; T.cacheWrite += a.cacheWrite; T.cacheRead += a.cacheRead;
       T.cost += a.cost; if (!a.costKnown) T.costKnown = false; T.toolCalls += a.toolCalls; T.agents++; T[a.status] = (T[a.status] || 0) + 1;
-      if (a.needsHuman) { T.needs++; T.needReasons[a.needReason] = (T.needReasons[a.needReason] || 0) + 1; }
+      if (a.needsHuman) { T.needs++; T.needReasons[a.needReason!] = (T.needReasons[a.needReason!] || 0) + 1; }
     }
     return T;
   }
-  function group(keyOf, make) {
-    const m = new Map();
+  function group<G extends object>(keyOf: (a: Agent) => string, make: (k: string, a: Agent) => G) {
+    const m = new Map<string, G & Group>();
     for (const a of flat) {
-      const k = keyOf(a); let g = m.get(k); if (!g) { g = make(k, a); g.tokens = 0; g.cost = 0; g.running = 0; g.agents = 0; g.costKnown = true; m.set(k, g); }
+      const k = keyOf(a); let g = m.get(k); if (!g) { g = make(k, a) as G & Group; g.tokens = 0; g.cost = 0; g.running = 0; g.agents = 0; g.costKnown = true; m.set(k, g); }
       g.tokens += a.tokens; g.cost += a.cost; g.agents++; if (a.status === 'running') g.running++; if (!a.costKnown) g.costKnown = false;
     }
     return [...m.values()].sort((x, y) => y.tokens - x.tokens);
@@ -122,7 +135,7 @@
     });
   }
 
-  const fmt = {
+  const fmt: Fmt = {
     tokens(n) { n = +n || 0; const a = Math.abs(n); return a >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : a >= 1e6 ? (n / 1e6).toFixed(a >= 1e8 ? 0 : a >= 1e7 ? 1 : 2) + 'M' : a >= 1e3 ? (n / 1e3).toFixed(a >= 1e5 ? 0 : 1) + 'k' : String(Math.round(n)); },
     cost(n) { n = +n || 0; if (n > 0 && n < 0.01) return '<$0.01'; return n >= 1000 ? '$' + Math.round(n).toLocaleString('en-US') : n >= 100 ? '$' + n.toFixed(0) : '$' + n.toFixed(2); },
     dur(ms) { ms = Math.max(0, ms | 0); const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? `${h}h ${String(m).padStart(2, '0')}m` : m ? `${m}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`; },

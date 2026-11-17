@@ -3,7 +3,7 @@
 .chat-new{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin-top:8px;padding:7px 0;border-radius:3px;background:var(--color-raise);color:var(--color-ink);font:500 11px var(--font-mono);text-align:center;text-transform:uppercase;letter-spacing:.02em;box-shadow:inset 0 0 0 1px var(--color-edge)}
 .chat-new:hover{background:var(--color-signal);color:oklch(18% 0 0)}
 .chat-new svg{flex:none}
-.chat-acts{display:grid;grid-template-columns:1fr auto auto;gap:6px;margin-top:8px}
+.chat-acts{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
 .chat-acts .chat-new{margin-top:0}
 .chat-ref{width:auto;padding:7px 12px}
 .chat-ref[disabled]{opacity:.7;cursor:progress}
@@ -150,6 +150,21 @@ dialog.cn::backdrop{background:oklch(10% 0.005 260 / .72);backdrop-filter:blur(3
 .cq-msg input:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
 .chat.ext{flex:none}
 .chat.ext[hidden]{display:none}
+.chat-in[hidden]{display:none}
+
+/* Office view, looking from a desk (body.pov, set by office.js): the detail card is the monitor in front of you.
+   It sits in the middle between the two columns with a bezel; --scr is that agent's screen (effort) colour. */
+@media (min-width:821px){
+  body.pov #detail{left:calc(var(--gap) + var(--col-w) + 34px);right:calc(var(--gap) + var(--col-w) + 34px);width:auto;max-width:880px;margin-inline:auto;top:72px;max-height:calc(100vh - 72px - 34px);
+    border-radius:4px;box-shadow:0 0 0 1px var(--color-edge),0 0 0 11px oklch(13% 0.006 260),0 0 0 12px var(--color-edge),0 14px 0 -1px var(--scr,var(--color-signal)),0 40px 90px -20px #000;
+    animation:scr-in .45s .95s both cubic-bezier(.16,1,.3,1)}
+  body.pov #detail.has-chat{width:auto;height:calc(100vh - 72px - 34px)}
+  body.pov #detail.has-chat #detail-body{max-height:18vh}
+  body.pov #detail.has-chat #detail-body .d-grid{display:none} /* role, model and effort are the clothes, desk and screen you are looking at */
+  body.pov #detail .cm{max-width:86%}
+}
+@keyframes scr-in{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){body.pov #detail{animation:none}}
 
 /* Usage full view (usage.js) */
 dialog.us{border:0;padding:0;background:transparent;color:var(--color-ink);max-width:calc(100vw - 24px);max-height:calc(100vh - 24px);overflow:visible}

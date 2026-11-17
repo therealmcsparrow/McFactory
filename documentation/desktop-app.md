@@ -22,6 +22,8 @@ npm run dev     # development window
 npm run build   # installer
 ```
 
+Both commands first build the page (`npm run build` in the repository root, which needs `npm ci` there once). The app bundles the files of `dist/` listed in `bundle.resources` of `src-tauri/tauri.conf.json`; when a build adds or removes a file, update that list (`npm test` fails until it matches).
+
 The installer is written to `desktop/src-tauri/target/release/bundle/nsis/`.
 
 Releases on GitHub include the installer, built by the Release workflow. See [MAINTAINING.md](../MAINTAINING.md).
