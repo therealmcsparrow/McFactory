@@ -4,6 +4,8 @@ All notable changes to this project are listed here.
 
 ## Unreleased
 
+## 0.1.3 - 2026-11-17
+
 ### Added
 
 -   **Office view**: a second scene for the same data, with buildings for projects, desk rows for sessions and people for agents. Switch with the Factory / Office buttons or `?view=office`. See [The office view](documentation/office-view.md).
