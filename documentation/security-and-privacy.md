@@ -20,6 +20,18 @@ Two exceptions, both only for the page that holds this run's token:
 - **Dashboard sessions**: their own chat log.
 - **Terminal and desktop sessions**: their message text, and only while that session's chat panel is open. It never appears in `/api/state`.
 
+## Subagent screens
+
+In the [office view](office-view.md), clicking a subagent opens a read-only screen. It follows the same rule as the chat panel of a terminal session:
+
+- It needs this run's page token.
+- The file is read only while the screen is open.
+- It shows the subagent's own assistant text, and tool names with a short summary.
+- It never shows the brief (the user-role lines), thinking, tool input beyond the summary, or tool output.
+- Nothing leaves your computer, and none of it appears in `/api/state`.
+
+The room a session sits in (meeting room, kitchen) comes from the command or skill name only. The speech balloons show dots, never text.
+
 ## Secrets the server handles
 
 The **peer token** of a terminal or desktop session (from its `.key` file) is read for each send and written only to that session's own pipe. It is never logged, never sent to the browser and never part of an HTTP response or the snapshot.

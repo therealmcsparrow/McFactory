@@ -5,8 +5,8 @@
   "scripts": {
     "sidecar": "node scripts/build-sidecar.mjs",
     "icons": "tauri icon icon.svg",
-    "dev": "node scripts/build-sidecar.mjs && tauri dev",
-    "build": "node scripts/build-sidecar.mjs && tauri build"
+    "dev": "npm --prefix .. run build && node scripts/build-sidecar.mjs && tauri dev",
+    "build": "npm --prefix .. run build && node scripts/build-sidecar.mjs && tauri build"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.4"

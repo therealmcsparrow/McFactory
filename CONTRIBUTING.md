@@ -16,16 +16,19 @@ Do not open a public issue or discussion for a security problem. Report it priva
 
 ## Set up the project
 
-You need Node.js 22 or later. The server uses Node's built-in modules only, so there is nothing to install.
+You need Node.js 22 or later. The server uses Node's built-in modules only. The page is TypeScript in `src/`, compiled to `dist/`; `npm ci` installs the two pinned dev tools for that (TypeScript and the three.js types).
 
-1.  Clone the repository.
-2.  Run `node server.js` and open http://127.0.0.1:4545.
-3.  Run `npm test` before you open a pull request.
+1.  Clone the repository and run `npm ci`.
+2.  Run `npm start` (it builds `dist/`, then starts the server) and open http://127.0.0.1:4545. After a change in `src/`, run `npm run build` and reload.
+3.  Run `npm run typecheck` and `npm test` before you open a pull request.
+
+[Front-end files](documentation/getting-started.md#front-end-files) lists what is where in `src/`.
 
 To work on the page without your own sessions showing, use demo data:
 
 ```sh
 node dev/demo/make-demo.js
+npm run build
 node server.js --root dev/demo/out/.claude/projects --no-hook --no-statusline --port 4600
 ```
 
@@ -33,13 +36,14 @@ The desktop app needs Rust and Node.js 25.5 or later. See [Desktop app](document
 
 ## Rules for changes
 
--   **No dependencies in the server.** `server.js` and the page files use Node and browser built-ins only (the page loads three.js from jsDelivr at a fixed version, and its fonts from Google Fonts; add no other outside requests).
+-   **No dependencies in the server.** `server.js` stays plain JavaScript on Node built-ins only. The page uses browser built-ins only at run time (it loads three.js from jsDelivr at a fixed version, and its fonts from Google Fonts; add no other outside requests). The only packages are the pinned build-time dev dependencies `typescript` and `@types/three`.
+-   **Strict TypeScript.** The front end compiles with `strict`, and the build fails on any type error. Avoid `any`.
 -   **Privacy first.** For sessions the dashboard did not start, only numbers, model names, tool names, titles and subagent descriptions may reach the browser. Read [Security and privacy](documentation/security-and-privacy.md) before you change what the server sends.
 -   **Secrets stay put.** The page token and the peer tokens of sessions are never logged, never put in a response that does not need them, and never sent anywhere else.
 
 ## Checks on GitHub
 
-The Validate workflow runs a syntax check and `npm test` on Ubuntu and Windows with Node 22 and 26, and `npm audit` for the desktop app. A pull request can only be merged when these checks are green.
+The Validate workflow runs a syntax check, the build, the type check and `npm test` on Ubuntu and Windows with Node 22 and 26, and `npm audit` for the desktop app. A pull request can only be merged when these checks are green.
 
 ## Tests and documentation
 

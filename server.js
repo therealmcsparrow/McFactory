@@ -8,6 +8,7 @@
 //   /api/chat/*        chat with sessions THIS server started (see "owned chat sessions")
 //   /hook/permission, /hook/pretool, /api/ext/*   answer terminal/desktop prompts through global http hooks (see "external prompts")
 //   /api/peer/*        chat with terminal/desktop sessions over their local messaging pipe (see "peer chat")
+//   /api/agent/*       read-only screen of one subagent (office view: its own text + tool names; see "subagent screen")
 //   /api/refresh       POST, chat token: rescan sessions and transcripts now and re-push every stream
 //   --install-hook [--with-ask] / --uninstall-hook [--settings <file>]   merge/remove only our entries in ~/.claude/settings.json
 // PRIVACY: for every session the dashboard did not start, only the session title (first prompt, 60 chars)
@@ -17,6 +18,9 @@
 // Message text of terminal and desktop sessions is only sent to the local dashboard page that holds this run's
 // chat token, and only while that session's chat panel is open. It never appears in /api/state, and nothing
 // leaves the machine. The session's peer token (from its key file) is only ever written to its own pipe.
+// A subagent's screen (/api/agent/<id>/stream) follows the same rule: the subagent's own assistant text and tool
+// names + short summary, chat token required, read only while a screen is open. Never its brief, never tool output.
+// /api/state also carries one flag per session, "mode" (brainstorm | cooler | null), read from the command NAME only.
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -32,7 +36,7 @@ const arg = (name, def) => { const i = argv.indexOf('--' + name); return i >= 0 
 const PORT = +arg('port', 4545);
 const DEFAULT_HOURS = +arg('hours', 24);
 const ROOT = path.resolve(arg('root', path.join(os.homedir(), '.claude', 'projects')));
-const HERE = path.resolve(arg('static', __dirname)); // --static <dir>: where index.html, chat.js etc. live (the desktop sidecar passes its resource folder)
+const HERE = path.resolve(arg('static', path.join(__dirname, 'dist'))); // --static <dir>: the built front end (npm run build writes dist/; the desktop sidecar passes its resource folder)
 const HOUR = 3600e3;
 const RUN_MS = 90e3, WAIT_MS = 10 * 60e3;
 const MAX_HOURS = 24 * 31;
@@ -250,7 +254,7 @@ function readMeta(a) {
   try {
     const st = fs.statSync(a.metaPath); if (st.mtimeMs === a.metaMtime) return; a.metaMtime = st.mtimeMs;
     const m = JSON.parse(fs.readFileSync(a.metaPath, 'utf8'));
-    a.meta = { finished: m.finished === true, agentType: m.agentType || '', description: m.description || '', spawnDepth: m.spawnDepth || 1, pickedEffortModel: m.pickedEffortModel || '', error: !!(m.error || m.failed || m.status === 'failed') };
+    a.meta = { finished: m.finished === true, toolUseId: typeof m.toolUseId === 'string' ? m.toolUseId.slice(0, 80) : '', agentType: m.agentType || '', description: m.description || '', spawnDepth: m.spawnDepth || 1, parent: typeof m.parentAgentId === 'string' && /^[a-z0-9]{1,40}$/i.test(m.parentAgentId) ? m.parentAgentId : '', pickedEffortModel: m.pickedEffortModel || '', error: !!(m.error || m.failed || m.status === 'failed') };
     if (a.meta.agentType) a.role = a.meta.agentType.replace(/^aico:/, '');
     a.label = String(a.meta.description).slice(0, 80);
     a.pidText = aicoId(a.meta.description);
@@ -326,14 +330,14 @@ function handleLine(f, line) {
   else { const m = TS_RE.exec(line.length > 4000 ? line.slice(-4000) : line) || TS_RE.exec(line); if (m) ts = Date.parse(m[1]); }
   if (ts) { if (!a.firstTs || ts < a.firstTs) a.firstTs = ts; if (ts > a.lastTs) a.lastTs = ts; }
   if (!o) { // huge unparsed line: still resolve any tool results it carries
-    if (a.pend.size && line.includes('"tool_use_id"')) for (const m of line.matchAll(TUID_RE)) a.pend.delete(m[1]);
+    if ((a.pend.size || (a.disp && a.disp.size)) && line.includes('"tool_use_id"')) for (const m of line.matchAll(TUID_RE)) { a.pend.delete(m[1]); if (a.disp) a.disp.delete(m[1]); }
     return;
   }
   if (o.permissionMode) a.permMode = o.permissionMode;
   if (o.type === 'system' && o.subtype === 'turn_duration') { a.turnEnd = true; a.turnEndTs = ts || a.lastTs; a.pendingBg = +o.pendingBackgroundAgentCount || 0; }
   if (o.type === 'user' && o.message && !o.isMeta && !o.isCompactSummary) {
     const c = o.message.content; let results = false;
-    if (Array.isArray(c)) for (const b of c) if (b && b.type === 'tool_result') { results = true; a.pend.delete(b.tool_use_id); }
+    if (Array.isArray(c)) for (const b of c) if (b && b.type === 'tool_result') { results = true; a.pend.delete(b.tool_use_id); if (a.disp) a.disp.delete(b.tool_use_id); }
     if (!results) { a.pend.clear(); a.turnEnd = false; } // a fresh prompt: whatever was pending before is gone
   }
   if (o.cwd || o.gitBranch) {
@@ -348,6 +352,10 @@ function handleLine(f, line) {
     if (t && !t.startsWith('<') && !t.startsWith('[Request interrupted')) { a.title = t.replace(/\s+/g, ' ').slice(0, 60); a.pidText = aicoId(t); }
     else if (!a.cmdTitle && t.startsWith('<command-name>')) { const m = /<command-name>([^<]+)<\/command-name>/.exec(t); if (m && !/^\/(clear|compact|resume|exit|model|effort|config)\b/.test(m[1].trim())) a.cmdTitle = m[1].trim().slice(0, 60); }
   }
+  if (o.type === 'user' && f.kind === 'main' && o.message && !o.isSidechain && !o.isCompactSummary) {
+    const t = textOf(o.message.content); // a slash command line: <command-name>/aico:cooler</command-name>
+    if (t.includes('<command-name>')) { const m = CMD_NAME_RE.exec(t); if (m) setMode(a, m[1]); }
+  }
   if (o.type !== 'assistant' || !o.message) return;
   const msg = o.message;
   if (o.isApiErrorMessage || o.error || msg.model === '<synthetic>') {
@@ -361,11 +369,46 @@ function handleLine(f, line) {
   const key = msg.id || o.requestId || o.uuid;
   const prev = a.msgs.get(key);
   a.msgs.set(key, { ts: prev ? prev.ts : ts, model: msg.model || a.model, in: u.input_tokens || 0, out: u.output_tokens || 0, cw: u.cache_creation_input_tokens || 0, cr: u.cache_read_input_tokens || 0 });
-  if (Array.isArray(msg.content)) for (const c of msg.content) if (c && c.type === 'tool_use') { a.tools.push(ts); a.lastTool = String(c.name || '').slice(0, 40); a.pend.set(c.id, { name: String(c.name || ''), ts }); a.turnEnd = false; }
+  if (Array.isArray(msg.content)) for (const c of msg.content) if (c && c.type === 'tool_use') { a.tools.push(ts); a.lastTool = String(c.name || '').slice(0, 40); a.pend.set(c.id, { name: String(c.name || ''), ts }); a.turnEnd = false;
+    if (f.kind === 'main' && c.name === 'Skill' && c.input && typeof c.input.skill === 'string') setMode(a, c.input.skill);
+    if (f.kind === 'main' && DELEGATE.has(c.name) && typeof c.id === 'string' && c.input && typeof c.input === 'object') noteDispatch(a, c, ts); }
   if (msg.stop_reason === 'end_turn' && !a.pend.size) { a.turnEnd = true; a.turnEndTs = ts; a.pendingBg = 0; }
   else if (msg.stop_reason && msg.stop_reason !== 'end_turn') a.turnEnd = false;
 }
 const TUID_RE = /"tool_use_id":"([^"]+)"/g;
+// dispatched subagents (office view): an Agent/Task tool_use without a tool_result yet. Only the subagent type and the
+// description are kept (the same two names the real subagent's .meta.json gives); the prompt is never stored.
+const DISPATCH_TTL = 90e3, DISPATCH_MAX = 100;
+function noteDispatch(a, c, ts) {
+  if (!a.disp) a.disp = new Map();
+  const type = typeof c.input.subagent_type === 'string' && c.input.subagent_type ? c.input.subagent_type : 'general-purpose';
+  a.disp.set(c.id.slice(0, 80), { ts: ts || a.lastTs || Date.now(), type: type.slice(0, 80), desc: typeof c.input.description === 'string' ? c.input.description.slice(0, 80) : '' });
+  if (a.disp.size > DISPATCH_MAX) a.disp.delete(a.disp.keys().next().value);
+  version++;
+}
+// pending dispatches of one session that no real subagent has taken over yet.
+// Hard link: a real subagent's meta.toolUseId. Fallback (older Claude Code, no toolUseId): first-in-first-out on the
+// same role, a real subagent without a role yet (meta not read) matches any.
+function openDispatches(main, subs, now) {
+  if (!main || !main.disp || !main.disp.size) return [];
+  const linked = new Set(); for (const s of subs) if (s.meta && s.meta.toolUseId) linked.add(s.meta.toolUseId);
+  const left = [...main.disp].filter(([id, d]) => !linked.has(id) && now - d.ts <= DISPATCH_TTL).sort((x, y) => x[1].ts - y[1].ts);
+  const loose = subs.filter(s => s.firstTs && !(s.meta && s.meta.toolUseId)).sort((x, y) => x.firstTs - y.firstTs);
+  for (const s of loose) {
+    const role = s.meta && s.meta.agentType ? s.meta.agentType.replace(/^aico:/, '') : '';
+    const i = left.findIndex(([, d]) => d.ts <= s.firstTs + 5000 && (!role || role === d.type.replace(/^aico:/, '')));
+    if (i >= 0) left.splice(i, 1);
+  }
+  return left;
+}
+// session mode (office view: meeting room / kitchen). Only the command or skill NAME is read; the newest aico one wins,
+// any other aico Playbook clears it. Built-in commands (/clear, /model ...) and other skills leave it alone.
+const CMD_NAME_RE = /<command-name>\s*\/?([\w:.-]{1,80})\s*<\/command-name>/;
+function setMode(a, name) {
+  const m = /^\/?aico:([\w-]+)$/.exec(String(name).trim()); if (!m) return;
+  const mode = m[1] === 'brainstorm' || m[1] === 'cooler' ? m[1] : '';
+  if (mode !== (a.mode || '')) { a.mode = mode; version++; }
+}
 // aico project ID: P + yyyymmdd + . + 6 digits (a step suffix like /05-fix is dropped). Only the ID leaves the server.
 const AICO_ID_RE = /(?:^|[^A-Za-z0-9])(P20\d{6}\.\d{6})(?!\d)/;
 function aicoId(s) { const m = s ? AICO_ID_RE.exec(String(s)) : null; return m ? m[1] : ''; }
@@ -381,7 +424,18 @@ function sessionPid(main, subs) {
 }
 
 // ───────────── pump: watch + interval fallback
-let rescanAt = 0;
+let rescanAt = 0, quickT = null;
+// A change in a tracked transcript is read and sent on shortly after it happens, not at the next one-second tick, so a subagent that
+// was just sent out shows up at once. Only while a page is open, at most once per 150 ms, and only the changed files are read.
+function quick() {
+  if (quickT || !clients.size) return;
+  quickT = setTimeout(() => {
+    quickT = null; let budget = 8 << 20;
+    for (const fp of [...dirtyFiles]) { const f = files.get(fp); if (!f) continue; budget -= readFile(f, budget); if (f.offset >= f.size) dirtyFiles.delete(fp); if (budget <= 0) break; }
+    for (const c of clients) { try { push(c); } catch { clients.delete(c); } }
+  }, 150);
+  if (quickT.unref) quickT.unref();
+}
 function pump() {
   const now = Date.now();
   if (now >= rescanAt) { scanDirs(); rescanAt = now + 10e3; }
@@ -397,7 +451,7 @@ function pump() {
     if (f.offset >= f.size) dirtyFiles.delete(fp);
     if (budget <= 0) break;
   }
-  for (const a of agents.values()) if (a.kind === 'sub' && !(a.meta && a.meta.finished)) readMeta(a);
+  for (const a of agents.values()) if (a.kind === 'sub' && !(a.meta && a.meta.finished && !resumed(a))) readMeta(a);
   readLive();
   extSweep();
 }
@@ -466,14 +520,16 @@ function needsOf(main, subs, now) { // -> Map agentId -> {reason, since}
 try {
   fs.watch(ROOT, { recursive: true }, (ev, name) => {
     if (!name) return; const fp = path.join(ROOT, String(name));
-    if (fp.endsWith('.jsonl')) { if (files.has(fp)) dirtyFiles.add(fp); else rescanAt = 0; }
+    if (fp.endsWith('.jsonl')) { if (files.has(fp)) { dirtyFiles.add(fp); quick(); } else rescanAt = 0; }
   });
 } catch (e) { console.warn('fs.watch unavailable, polling only:', e.message); }
 
 // ───────────── snapshot
+// a finished subagent that was resumed writes new transcript lines after its .meta.json said finished: running again
+function resumed(a) { return !!(a.meta && a.meta.finished && a.metaMtime && a.lastTs > a.metaMtime + 2000); }
 function statusOf(a, now) {
   const idle = now - a.lastTs;
-  const finished = a.meta && a.meta.finished;
+  const finished = a.meta && a.meta.finished && !resumed(a);
   if (a.lastAssistantErr && (finished || idle > RUN_MS)) return 'failed';
   if (a.meta && a.meta.error) return 'failed';
   if (finished) return 'done';
@@ -521,8 +577,10 @@ function buildSnapshot(hours) {
       lastActivity: a.lastTs, input, output, cacheWrite: cw, cacheRead: cr, cache: cw + cr, tokens: input + output + cw + cr,
       cost, costKnown, toolCalls, tool: a.lastTool || '—', rate: recent / (RATE_WIN / 1000),
       ctx: Math.min(1, lastCtx / mi.ctxWindow), progress: status === 'done' ? 1 : Math.min(1, lastCtx / mi.ctxWindow),
-      parentId: a.kind === 'sub' && main ? main.id : null, depth: a.meta ? a.meta.spawnDepth : 0,
+      // a subagent's parent is the agent that sent it out: the main agent, or for a nested one (spawnDepth 2+) the subagent named in its .meta.json
+      parentId: a.kind !== 'sub' ? null : a.meta && a.meta.parent && agents.has('a-' + a.meta.parent) ? 'a-' + a.meta.parent : main ? main.id : null, depth: a.meta ? a.meta.spawnDepth : 0,
     };
+    if (a.kind === 'sub' && a.meta && a.meta.toolUseId) ag.dispatch = a.meta.toolUseId; // hard link to the dispatching tool_use
     ag.needsHuman = !!(need && status !== 'failed');
     ag.needReason = ag.needsHuman ? need.reason : null; ag.needSince = ag.needsHuman ? need.since : null;
     ag.activity = ag.needsHuman ? 'needs you · ' + need.reason : status === 'running' ? (a.lastTool ? 'using ' + a.lastTool : 'thinking') : status === 'waiting' ? 'idle ' + Math.round((now - a.lastTs) / 60e3) + 'm' : status === 'failed' ? 'API error' : 'finished';
@@ -541,7 +599,19 @@ function buildSnapshot(hours) {
     const main = agents.get('s-' + t.id);
     t.title = main ? (main.title || main.cmdTitle || main.slug || 'session ' + t.id.slice(0, 8)) : 'session ' + t.id.slice(0, 8);
     { const subs = []; for (const x of t.agents) if (x.kind === 'sub') { const sa = agents.get(x.id); if (sa) subs.push(sa); }
+      // dispatched, not yet started subagents: only while the session is open (same rule as t.openBy below)
+      const open = procs.has(t.id) || now - Math.max(...t.agents.map(x => x.lastActivity)) < OPEN_MS;
+      if (open) for (const [tuid, d] of openDispatches(main, [...agents.values()].filter(x => x.kind === 'sub' && x.sessionId === t.id), now)) {
+        if (d.ts < since) continue;
+        const role = d.type.replace(/^aico:/, ''), mi = modelInfo('unknown');
+        if (!out.models[mi.id]) out.models[mi.id] = { id: mi.id, label: mi.label, family: mi.family, version: mi.version, priced: !!mi.price, ctxWindow: mi.ctxWindow };
+        t.agents.push({ id: 'p-' + tuid, taskId: t.id, projectId: t.projectId, kind: 'sub', role, label: d.desc || role, pending: true,
+          model: 'unknown', effort: 'default', status: 'running', startedAt: d.ts, endedAt: null, lastActivity: d.ts,
+          input: 0, output: 0, cacheWrite: 0, cacheRead: 0, cache: 0, tokens: 0, cost: 0, costKnown: true, toolCalls: 0, tool: '—', rate: 0,
+          ctx: 0, progress: 0, parentId: main ? main.id : null, depth: 1, needsHuman: false, needReason: null, needSince: null, activity: 'starting' });
+      }
       const pid = sessionPid(main, subs); t.aicoId = pid ? pid.id : null; t.aicoIdSource = pid ? pid.src : null; }
+    t.mode = main && main.mode ? main.mode : null; // brainstorm | cooler | null: a flag, from the command name only
     // arm order: main first, then startedAt ascending (missing last), tie -> id
     t.agents.sort((x, y) => ((y.kind === 'main') - (x.kind === 'main')) || ((x.startedAt || Infinity) - (y.startedAt || Infinity)) || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
     const nh = t.agents.filter(x => x.needsHuman);
@@ -1095,7 +1165,7 @@ function tailRead(t) { // new complete lines since t.offset -> entries; lines ov
     const part = buf.subarray(start, nl); start = nl + 1;
     if (t.skip) { t.skip = false; t.carry = null; continue; }
     const line = t.carry ? Buffer.concat([t.carry, part]) : part; t.carry = null;
-    if (line.length <= PEER_LINE_MAX) for (const e of peerEntries(line.toString('utf8'), sent)) out.push(e);
+    if (line.length <= PEER_LINE_MAX) for (const e of (t.parse ? t.parse(line.toString('utf8')) : peerEntries(line.toString('utf8'), sent))) out.push(e);
   }
   if (start < buf.length && !t.skip) {
     const rest = t.carry ? Buffer.concat([t.carry, buf.subarray(start)]) : Buffer.from(buf.subarray(start));
@@ -1173,9 +1243,78 @@ async function peerRoute(req, res, u) {
   }
 }
 
+// ───────────── subagent screen (office view: look at one subagent's monitor)
+// Read-only. One tail per subagent transcript while at least one screen listens, same reader as the peer stream.
+// Only the subagent's own assistant text and tool name + short summary: never its brief (the user-role lines),
+// never thinking, never tool input beyond the summary, never tool output.
+const agentTails = new Map(); // agent id -> {id, agent, fp, offset, carry, skip, log, seq, listeners, meta, parse}
+function agentEntries(line) { // one subagent transcript line -> entries (no i/ts yet)
+  if (typeof line !== 'string' || line.length > PEER_LINE_MAX) return [];
+  let o; try { o = JSON.parse(line); } catch { return []; }
+  if (!o || typeof o !== 'object' || o.type !== 'assistant' || !o.message || !Array.isArray(o.message.content)) return [];
+  const at = Date.parse(o.timestamp) || Date.now(), out = [];
+  if (o.isApiErrorMessage || o.error) return [{ kind: 'system', text: 'API error', at }];
+  for (const b of o.message.content) {
+    if (!b) continue;
+    if (b.type === 'text' && typeof b.text === 'string' && b.text.trim()) out.push({ kind: 'assistant', text: clip(b.text, MAX_TEXT), at });
+    else if (b.type === 'tool_use') out.push({ kind: 'tool', name: clip(b.name, 60), text: toolSummary(b.name, b.input), at });
+  }
+  return out;
+}
+function agentFile(id) { for (const f of files.values()) if (f.kind === 'sub' && f.agent.id === id) return f; return null; }
+function agentMeta(a) { return { role: a.role, label: a.label || a.role, status: statusOf(a, Date.now()), sessionId: a.sessionId }; }
+function agentTailOpen(id, f) {
+  const t = { id, sid: '', agent: f.agent, fp: f.path, offset: 0, carry: null, skip: false, log: [], seq: 0, listeners: new Set(), meta: null, parse: agentEntries };
+  try { const size = fs.statSync(t.fp).size; if (size > PEER_INIT_BYTES) { t.offset = size - PEER_INIT_BYTES; t.skip = true; } } catch { }
+  for (let n = 0; n < 8; n++) { const es = tailRead(t); for (const e of es) tailAdd(t, e); if (!es.length && !t.carry) break; }
+  t.meta = agentMeta(t.agent);
+  agentTails.set(id, t); return t;
+}
+function agentTick() { // every second: new lines and status changes to the open screens
+  for (const t of agentTails.values()) {
+    for (const e of tailRead(t)) { tailAdd(t, e); for (const r of t.listeners) sse(r, 'entry', e); }
+    const m = agentMeta(t.agent);
+    if (JSON.stringify(m) !== JSON.stringify(t.meta)) { t.meta = m; for (const r of t.listeners) sse(r, 'meta', m); }
+  }
+}
+function agentRoute(req, res, u) {
+  const m = /^\/api\/agent\/(a-[\w-]{1,64})\/stream$/.exec(u.pathname);
+  if (!m) return sendJson(res, 404, { error: 'not found' });
+  if (req.method !== 'GET') return sendJson(res, 405, { error: 'GET only' });
+  if (!tokenOk(u.searchParams.get('token'))) return sendJson(res, 403, { error: 'bad token' });
+  const id = m[1]; let t = agentTails.get(id);
+  if (!t) { const f = agentFile(id); if (!f) return sendJson(res, 404, { error: 'no subagent with this id' }); t = agentTailOpen(id, f); }
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' });
+  res.write('retry: 2000\n\n'); sse(res, 'init', { meta: t.meta, log: t.log });
+  t.listeners.add(res);
+  req.on('close', () => { t.listeners.delete(res); if (!t.listeners.size && agentTails.get(id) === t) agentTails.delete(id); });
+}
+
 // ───────────── http
-const MIME ={ '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.md': 'text/plain; charset=utf-8' };
-const STATIC = new Set(['index.html', 'live-data.js', 'chat.js', 'chat.css', 'usage.js']);
+const MIME ={ '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.map': 'application/json; charset=utf-8', '.md': 'text/plain; charset=utf-8' };
+// The static allowlist: built once at start-up by walking the built folder (HERE). Only .html/.js/.css/.map files,
+// no symlinks followed, every real path checked to stay inside HERE. A request is served only when its path is an
+// exact key of this map, so nothing from the URL ever reaches the filesystem.
+function staticFiles(root) {
+  const out = new Map(); let real;
+  try { real = fs.realpathSync(root); } catch { return out; }
+  const walk = (dir, rel, depth) => {
+    if (depth > 8) return;
+    let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      if (e.isSymbolicLink()) continue;
+      const abs = path.join(dir, e.name), r = rel ? rel + '/' + e.name : e.name;
+      if (e.isDirectory()) { walk(abs, r, depth + 1); continue; }
+      if (!e.isFile() || !MIME[path.extname(e.name)] || path.extname(e.name) === '.md') continue;
+      let p; try { p = fs.realpathSync(abs); } catch { continue; }
+      if (p.startsWith(real + path.sep)) out.set(r, p);
+    }
+  };
+  walk(real, '', 0);
+  return out;
+}
+const STATIC = staticFiles(HERE);
+const BUILT = STATIC.has('index.html');
 const clients = new Set();
 const server = http.createServer((req, res) => {
   if (!hostOk(req) || !originOk(req)) { res.writeHead(403, { 'content-type': 'text/plain' }); res.end('forbidden'); return; }
@@ -1183,6 +1322,7 @@ const server = http.createServer((req, res) => {
   if (u.pathname.startsWith('/api/chat/')) { chatRoute(req, res, u); return; }
   if (u.pathname.startsWith('/api/ext/')) { extRoute(req, res, u); return; }
   if (u.pathname.startsWith('/api/peer/')) { peerRoute(req, res, u); return; }
+  if (u.pathname.startsWith('/api/agent/')) { agentRoute(req, res, u); return; }
   if (u.pathname === '/hook/permission' || u.pathname === '/hook/pretool') { hookRoute(req, res, u); return; }
   if (u.pathname === '/api/fs/dirs') {
     if (req.method !== 'GET') return sendJson(res, 405, { error: 'GET only' });
@@ -1218,8 +1358,9 @@ const server = http.createServer((req, res) => {
   }
   if (u.pathname === '/favicon.ico') { res.writeHead(204); res.end(); return; }
   const name = u.pathname === '/' ? 'index.html' : u.pathname.slice(1);
+  if (!BUILT && name === 'index.html') { res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' }); res.end(`The front end is not built: no index.html in ${HERE}. Run "npm run build" (or "npm start"), then reload.`); return; }
   if (STATIC.has(name)) {
-    fs.readFile(path.join(HERE, name), (err, buf) => {
+    fs.readFile(STATIC.get(name), (err, buf) => {
       if (err) { res.writeHead(404); res.end('not found'); return; }
       if (name === 'index.html') buf = Buffer.from(buf.toString('utf8').replace('</head>', `<meta name="chat-token" content="${TOKEN}">\n</head>`));
       res.writeHead(200, { 'content-type': MIME[path.extname(name)] || 'application/octet-stream', 'cache-control': 'no-store' }); res.end(buf);
@@ -1240,13 +1381,14 @@ const t0 = Date.now(); while (dirtyFiles.size && Date.now() - t0 < 1500) pump();
 let beat = 0;
 setInterval(() => {
   pump();
-  peerTick();
+  peerTick(); agentTick();
   for (const c of clients) { try { push(c); } catch { clients.delete(c); } }
-  if (++beat % 15 === 0) { for (const c of clients) c.res.write(': ping\n\n'); for (const ch of [...chats.values(), ...peerTails.values()]) for (const r of ch.listeners) try { r.write(': ping\n\n'); } catch { } }
+  if (++beat % 15 === 0) { for (const c of clients) c.res.write(': ping\n\n'); for (const ch of [...chats.values(), ...peerTails.values(), ...agentTails.values()]) for (const r of ch.listeners) try { r.write(': ping\n\n'); } catch { } }
 }, 1000);
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`Claude Code factory → http://127.0.0.1:${PORT}/  (window ${DEFAULT_HOURS}h, ${files.size} transcripts tracked, ${(pendingBytes / 1e6).toFixed(1)} MB still to read)`);
   console.log(`source: ${ROOT}`);
+  if (!BUILT) console.error(`front end not built: no index.html in ${HERE}. Run "npm run build" (npm start does this for you).`);
   slEnsure();
 });

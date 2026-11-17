@@ -9,7 +9,7 @@ The page draws your Claude Code activity as an isometric factory. Everything on 
 | Factory hall | A project: the last folder name of the session's working folder. Up to 12 halls stand in a grid around the central warehouse; the rest are in the Factories list. Each hall has its name on a sign on poles along the front of the roof, a siren in the middle of the roof, and a subtotal sign. |
 | Conveyor line | An open session. Live sessions come first, at most 6 per hall ("+N more sessions"). The line sign shows title, tokens and status. |
 | Robot arm | A running or waiting agent on that session, at most 10 per line ("+N arms"). |
-| Arm base, lower arm, upper arm | Role, model and effort (dim to bright yellow). All arms are the same size. |
+| Arm base, lower arm, upper arm | Role, model and effort (low soft yellow, medium green, high orange, xhigh purple, max black). All arms are the same size. |
 | Pedestal gauge | The agent's tokens, as a log share of the biggest agent in the window. Lit cyan while running. Exact numbers are in the tooltip and the agent card. |
 | Crates | Tokens, coloured by role. |
 | Small yellow robots | Transport from the hall exits to the warehouse. |
@@ -21,7 +21,7 @@ The page draws your Claude Code activity as an isometric factory. Everything on 
 
 An arm only picks and places when tokens arrive: new usage, or a token rate in the last 60 seconds. Every cycle carries one crate (about 20,000 tokens of rate per crate, at least one per arrival). A running arm with no token flow holds still over its pad.
 
-Crates ride the line to the hall exit, and a cross conveyor feeds the outbound dock. Robots (2 to 12, scaled to the dock's throughput and backlog) carry up to 3 crates each to the warehouse pile. Idle robots park at the charging bay. Every crate that reaches the dock is delivered.
+Crates ride the line to the hall exit, and a cross conveyor feeds the outbound dock. Robots (2 to 12, scaled to the dock's throughput and backlog) carry up to 3 crates each to the warehouse pile. An empty robot drives 30 % faster than a loaded one; both slow down for bends the same way. Idle robots park at the charging bay. Every crate that reaches the dock is delivered.
 
 ### A stuck robot
 
@@ -77,3 +77,9 @@ A session that belongs to an [aico](https://github.com/therealmcsparrow/McAIComp
 ## Refresh
 
 The **Refresh** button beside New session rescans the session and transcript folders at once (instead of within 10 seconds), sends a new snapshot and reopens the live stream and any open chat. The page itself does not reload, so the camera, the open card and any text you typed stay.
+
+## Settings
+
+The **Settings** button beside Usage opens a dialog with fun elements, one group per view. Changes apply at once, without a reload, and are saved in this browser only.
+
+- **Breakdowns, tow truck and repair shop** (on by default): now and then a robot breaks down, a tow truck takes it to the repair garage and mechanics fix it. The **Break down** button forces one. When off, no robot breaks down, and the garage, its Repair sign, the tow truck and the Break down button are hidden. A breakdown in progress ends at once: the robot is repaired and drives out of the garage door.

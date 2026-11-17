@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Crate Works Live</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Martian+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+<script src="live-data.js"></script>
+<link rel="stylesheet" href="chat.css">
+<script src="chat.js" defer></script>
+<script src="usage.js" defer></script>
+<script src="settings.js"></script>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+</head>
+<body>
+<canvas id="c" aria-label="Isometric factory park of live Claude Code activity: one factory hall per project, one conveyor line per session, each robot arm is an agent assembling token crates; small robots carry the crates to the central warehouse, where they stack as the window total."></canvas>
+<div id="fallback" hidden><p>WebGL is unavailable, so the factory floor can’t render.<br>The control boards still show live totals.</p></div>
+
+<div class="col l">
+  <section class="board hz" aria-label="Output totals">
+    <div class="tag"><span title="~/.claude/projects">Live · local</span><span class="conn" id="conn" data-s="connecting" role="status"><i></i><span>connecting</span></span></div>
+    <h1>Crate Works</h1>
+    <div class="big"><b id="tot-tokens">0</b><small>tokens<br>assembled</small></div>
+    <div class="sub"><span id="tot-cost">$0.00</span><span id="tot-rate">0/s</span><span id="tot-calls">0 tools</span></div>
+    <svg id="spark" viewBox="0 0 260 30" preserveAspectRatio="none" role="img" aria-label="Token rate, last ten minutes"><path class="sp-area"/><path class="sp-line"/></svg>
+    <div class="win" id="win" role="group" aria-label="Time window"></div>
+    <div class="win vsw" id="view" role="group" aria-label="View"><button type="button" data-view="factory">Factory</button><button type="button" data-view="office">Office</button></div>
+    <div class="kpis">
+      <div style="--c:var(--color-ok)"><b id="k-running">0</b><span>arms on</span></div>
+      <div style="--c:var(--color-warn)"><b id="k-waiting">0</b><span>waiting</span></div>
+      <div style="--c:var(--color-ink-3)"><b id="k-done">0</b><span>parked</span></div>
+      <div style="--c:var(--color-bad)"><b id="k-failed">0</b><span>faulted</span></div>
+      <div class="kpi-human" id="kpi-human"><b id="k-needs">0</b><span>needs you</span><small id="k-needs-why"></small></div>
+    </div>
+  </section>
+  <section class="board grow" aria-label="Factories (projects)">
+    <h2>Factories <small id="lines-count">tokens · cost</small></h2>
+    <div class="scroll" id="projects"></div>
+  </section>
+  <section class="board lg-board" aria-label="Legend">
+    <h2><button type="button" class="lg-tog" id="lg-tog" aria-expanded="false" aria-controls="legend">Key <small>arm = agent</small><i aria-hidden="true"></i></button></h2>
+    <div class="legend" id="legend" hidden></div>
+  </section>
+</div>
+<div class="col r">
+  <section class="board" aria-label="Tokens by model">
+    <h2>Arm models <small>lower arm</small></h2>
+    <div id="models"></div>
+  </section>
+  <section class="board grow" aria-label="Arms working">
+    <h2>Arms working <small id="running-count">0</small></h2>
+    <ul id="running" data-max="12"></ul>
+  </section>
+  <section class="board" aria-label="Floor log" aria-live="polite">
+    <h2>Floor log</h2>
+    <ul id="feed" data-max="6"></ul>
+  </section>
+  <section class="board brk-board" aria-label="Robot breakdown">
+    <div class="win"><button id="brk" class="brk" type="button" aria-label="Break down a robot">Break down</button></div>
+  </section>
+  <section class="board rob-board" aria-label="Armoured car robbery">
+    <div class="win"><button id="rob" class="brk" type="button" aria-label="Stage a robbery">Robbery</button><button id="spd" class="brk" type="button" aria-label="Send a speeder">Speeder</button></div>
+  </section>
+  <script src="app/hud-office-button.js"></script>
+</div>
+
+<section id="empty" class="board hz" hidden aria-live="polite">
+  <h2 id="empty-h">No activity in the last 24h</h2>
+  <p>No Claude Code transcript under <code>~/.claude/projects</code> changed in this window. Widen it, or start a session and the first line lights up.</p>
+  <div class="win" id="win2" role="group" aria-label="Time window"></div>
+</section>
+<aside id="detail" class="board hz" hidden aria-label="Details"><button id="detail-close" class="x" aria-label="Close details"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button><div id="detail-body"></div></aside>
+<div id="tip" role="tooltip"></div>
+<button id="skip" class="btn" type="button">Skip intro</button>
+<button id="back" class="btn" type="button"><svg width="14" height="12" viewBox="0 0 14 12" aria-hidden="true"><path d="M6 1L1 6l5 5M1.5 6H13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="back-l">Overview · Esc</span></button>
+
+<script type="module" src="app/main.js"></script>
+</body>
+</html>
