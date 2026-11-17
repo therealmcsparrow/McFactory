@@ -4,6 +4,8 @@ All notable changes to this project are listed here.
 
 ## Unreleased
 
+## 0.1.4 - 2026-11-17
+
 ### Added
 
 -   **Continue here**: a terminal or desktop session that is closed there keeps its chat panel. A message reopens it as a dashboard session (`claude --resume`), so messages, approvals and questions go straight through without approving them in the terminal. Refused while the session is still open in a terminal. An ended dashboard session continues the same way. `POST /api/chat/start` takes `{resume, prompt}`. See [Continue here](documentation/peer-chat.md#continue-here).
