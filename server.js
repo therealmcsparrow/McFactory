@@ -10,7 +10,7 @@
 //   /api/peer/*        chat with terminal/desktop sessions over their local messaging pipe (see "peer chat")
 //   /api/agent/*       read-only screen of one subagent (office view: its own text + tool names; see "subagent screen")
 //   /api/refresh       POST, chat token: rescan sessions and transcripts now and re-push every stream
-//   --install-hook [--with-ask] / --uninstall-hook [--settings <file>]   merge/remove only our entries in ~/.claude/settings.json
+//   --install-hook [--no-ask] / --uninstall-hook [--settings <file>]   merge/remove only our entries in ~/.claude/settings.json
 // PRIVACY: for every session the dashboard did not start, only the session title (first prompt, 60 chars)
 // and subagent descriptions leave this process. No message text, tool inputs or tool outputs.
 // Dashboard-owned sessions (started via POST /api/chat/start) additionally stream their own chat log
@@ -44,7 +44,7 @@ const MAX_HOURS = 24 * 31;
 // ───────────── global hooks (answer terminal/desktop prompts from the dashboard)
 // Claude Code http hooks POST here and block until we answer. Fail-open: server down = normal flow.
 const HOOK_ON = !argv.includes('--no-hook');                                   // --no-hook: hook endpoints answer empty at once
-const HOOK_ASK = argv.includes('--ask-hook') || process.env.AICO_DASH_ASK === '1'; // AskUserQuestion via PreToolUse: OFF until probed
+const HOOK_ASK = !argv.includes('--no-ask-hook') && process.env.AICO_DASH_ASK !== '0'; // AskUserQuestion via PreToolUse: held only while a dashboard panel shows that session
 const HOOK_TIMEOUT_S = 300, HOOK_HOLD_MS = +process.env.AICO_DASH_HOLD_MS || 280e3;                              // settings timeout, and when we give up first (empty 200)
 const HOOK_URL_RE = /^http:\/\/127\.0\.0\.1:\d+\/hook\/(permission|pretool)$/;  // marks entries that are ours
 function hookCli() {
@@ -73,7 +73,7 @@ function hookCli() {
     const base = 'http://127.0.0.1:' + PORT + '/hook/';
     const add = (ev, entry) => { cfg.hooks = cfg.hooks && typeof cfg.hooks === 'object' ? cfg.hooks : {}; (cfg.hooks[ev] = Array.isArray(cfg.hooks[ev]) ? cfg.hooks[ev] : []).push(entry); };
     add('PermissionRequest', { hooks: [{ type: 'http', url: base + 'permission', timeout: HOOK_TIMEOUT_S }] });
-    if (argv.includes('--with-ask')) add('PreToolUse', { matcher: 'AskUserQuestion', hooks: [{ type: 'http', url: base + 'pretool', timeout: HOOK_TIMEOUT_S }] });
+    if (!argv.includes('--no-ask')) add('PreToolUse', { matcher: 'AskUserQuestion', hooks: [{ type: 'http', url: base + 'pretool', timeout: HOOK_TIMEOUT_S }] });
   }
   const tmp = file + '.aico-tmp';
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -805,9 +805,35 @@ function onLine(c, line) {
   }
   if (o.type === 'control_cancel_request' && o.request_id) { if (c.pending.delete(String(o.request_id))) touch(c); return; }
 }
+function transcriptCwd(fp) { // the first cwd in a transcript: where the session started (claude --resume looks it up from there)
+  let fd = null; const buf = Buffer.alloc(256 * 1024); let n = 0;
+  try { fd = fs.openSync(fp, 'r'); n = fs.readSync(fd, buf, 0, buf.length, 0); } catch { return ''; } finally { if (fd !== null) try { fs.closeSync(fd); } catch { } }
+  for (const line of buf.subarray(0, n).toString('utf8').split('\n')) {
+    if (!line.includes('"cwd"')) continue;
+    try { const o = JSON.parse(line); if (o && typeof o.cwd === 'string' && o.cwd) return o.cwd; } catch { }
+  }
+  return '';
+}
+function transcriptLog(fp, sid) { // the conversation so far, same reader and filter as the peer stream
+  const t = { sid, fp, offset: 0, carry: null, skip: false, log: [], seq: 0 };
+  try { const size = fs.statSync(fp).size; if (size > PEER_INIT_BYTES) { t.offset = size - PEER_INIT_BYTES; t.skip = true; } } catch { return []; }
+  for (let n = 0; n < 8; n++) { const es = tailRead(t); for (const e of es) tailAdd(t, e); if (!es.length && !t.carry) break; }
+  return t.log;
+}
+const resuming = new Set();
+function resumeTarget(sid) { // "Continue here": a terminal/desktop session that is closed there -> {fp, cwd, history}
+  if (typeof sid !== 'string' || !SID_RE.test(sid)) throw new HttpErr(400, 'bad session id');
+  const oc = chats.get(sid); if (oc && oc.alive) throw new HttpErr(409, 'this session already runs in the dashboard');
+  if (resuming.has(sid)) throw new HttpErr(409, 'this session is already being continued');
+  if (peerTarget(sid) || procs.has(sid)) throw new HttpErr(409, 'this session is still open in a terminal or the desktop app: close it there first (/exit), then continue it here');
+  const fp = peerFile(sid); if (!fp) throw new HttpErr(404, 'no transcript for this session');
+  const cwd = transcriptCwd(fp); if (!cwd) throw new HttpErr(409, 'the transcript does not say which folder the session ran in');
+  return { fp, cwd: validCwd(cwd), history: transcriptLog(fp, sid) };
+}
 function chatStart(b) {
   if (!b || typeof b !== 'object') throw new HttpErr(400, 'bad body');
-  const cwd = validCwd(b.cwd);
+  const resume = b.resume !== undefined ? String(b.resume) : '', rt = resume ? resumeTarget(resume) : null;
+  const cwd = rt ? rt.cwd : validCwd(b.cwd);
   const model = b.model ? String(b.model) : '', effort = b.effort ? String(b.effort) : '';
   if (model && !MODEL_RE.test(model)) throw new HttpErr(400, 'bad model');
   if (effort && !EFFORTS.has(effort)) throw new HttpErr(400, 'bad effort');
@@ -821,8 +847,11 @@ function chatStart(b) {
   if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);
   if (skipPerms) args.push('--dangerously-skip-permissions');
-  return new Promise((resolve, reject) => {
-    const c = { id: '', cwd, model, effort, skipPerms, proc: null, alive: true, busy: true, cost: 0, startedAt: Date.now(), log: [], seq: 0, pending: new Map(), listeners: new Set(), buf: '', stopping: false, stopTimer: null, onId: null };
+  if (rt) { args.push('--resume', resume); resuming.add(resume); }
+  return new Promise((resolve0, reject0) => {
+    const resolve = v => { resuming.delete(resume); resolve0(v); }, reject = e => { resuming.delete(resume); reject0(e); };
+    const c = { id: '', cwd, model, effort, skipPerms, proc: null, alive: true, busy: true, cost: 0, startedAt: Date.now(), log: [], seq: 0, pending: new Map(), listeners: new Set(), buf: '', stopping: false, stopTimer: null, onId: null, resumed: !!rt };
+    if (rt) { for (const e of rt.history) c.log.push(Object.assign({}, e, { i: ++c.seq })); c.log.push({ i: ++c.seq, ts: Date.now(), kind: 'system', text: 'Continued here from the terminal: messages and prompts now go through the dashboard' }); }
     let proc; try { proc = spawn(findClaude(), args, { cwd, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); } catch (e) { return reject(new HttpErr(500, 'cannot start claude: ' + e.message)); }
     c.proc = proc;
     let settled = false, errTail = '';
@@ -944,7 +973,7 @@ async function chatRoute(req, res, u) {
 }
 
 // ───────────── external prompts (terminal/desktop sessions, answered through the global http hooks)
-// POST /hook/permission (PermissionRequest) and POST /hook/pretool (PreToolUse, AskUserQuestion only, behind --ask-hook)
+// POST /hook/permission (PermissionRequest) and POST /hook/pretool (PreToolUse, AskUserQuestion only, off with --no-ask-hook)
 // register a pending prompt and hold the HTTP response open. First answer wins: the terminal dialog is shown at the same
 // time, so the card clears (and the hook is released with an empty 200 = "no decision") when the session moves on.
 // Anything uncertain answers empty: that only ever hands the decision back to the terminal.
@@ -979,6 +1008,13 @@ function extFinish(p, out) { // out = hook JSON, or null for "no decision"
   const res = p.res;
   if (!res.writableEnded && !res.destroyed) { try { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(out ? JSON.stringify(out) : ''); } catch { } }
   extTouch(p.sid);
+}
+// A held question blocks the terminal (its dialog only shows once the hook returns), so it is held only while someone
+// looks at that session in the dashboard: its chat panel (peer stream) or its prompt card (ext stream) is open.
+const UNWATCH_MS = 3000; // a reconnect (Refresh, a dropped stream) does not hand the question back at once
+function extWatched(sid) { const t = peerTails.get(sid), ls = extListeners.get(sid); return !!((t && t.listeners.size) || (ls && ls.size)); }
+function extUnwatched(sid) { // a panel closed: once nobody looks, held questions go back to the terminal
+  setTimeout(() => { if (extWatched(sid)) return; const m = ext.get(sid); if (m) for (const p of [...m.values()]) if (p.kind === 'ask') extFinish(p, null); }, +process.env.AICO_DASH_UNWATCH_MS || UNWATCH_MS);
 }
 function sessionLines(sid) { let n = 0; for (const a of agents.values()) if (a.sessionId === sid) n += a.nl || 0; return n; }
 function extSweep() { // called every pump (1s): release prompts the terminal already settled
@@ -1017,8 +1053,8 @@ async function hookRoute(req, res, u) {
     if (!HOOK_ON || !SID_RE.test(sid) || !tool || chats.has(sid) || (ext.get(sid) || { size: 0 }).size >= 8 || [...ext.values()].reduce((n, m) => n + m.size, 0) >= MAX_EXT) return empty();
     const input = b.tool_input && typeof b.tool_input === 'object' ? b.tool_input : {};
     let kind = 'perm', questions = null;
-    if (pre) { // AskUserQuestion only, and only when switched on
-      if (!HOOK_ASK || tool !== 'AskUserQuestion') return empty();
+    if (pre) { // AskUserQuestion only, when switched on, and only while a dashboard panel shows this session
+      if (!HOOK_ASK || tool !== 'AskUserQuestion' || !extWatched(sid)) return empty(); // nobody looking: the terminal asks at once
       questions = cleanQuestions(input.questions); if (!questions) return empty(); kind = 'ask';
     } else if (tool === 'AskUserQuestion') return empty(); // a question is not an Allow/Deny prompt
     const p = { id: crypto.randomBytes(8).toString('hex'), sid, kind, tool_name: clip(tool, 100), summary: kind === 'ask' ? clip(questions[0].question, 200) : extSummary(tool, input),
@@ -1043,7 +1079,7 @@ async function extRoute(req, res, u) {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' });
       res.write('retry: 2000\n\n'); sse(res, 'meta', extMeta(m[1]));
       let ls = extListeners.get(m[1]); if (!ls) extListeners.set(m[1], ls = new Set()); ls.add(res);
-      req.on('close', () => { ls.delete(res); if (!ls.size) extListeners.delete(m[1]); }); return;
+      req.on('close', () => { ls.delete(res); if (!ls.size && extListeners.get(m[1]) === ls) extListeners.delete(m[1]); extUnwatched(m[1]); }); return;
     }
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
     if (!tokenOk(req.headers['x-chat-token'])) return sendJson(res, 403, { error: 'bad token' });
@@ -1219,7 +1255,7 @@ async function peerRoute(req, res, u) {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' });
       res.write('retry: 2000\n\n'); sse(res, 'init', { meta: t.meta, log: t.log });
       t.listeners.add(res);
-      req.on('close', () => { t.listeners.delete(res); if (!t.listeners.size && peerTails.get(sid) === t) peerTails.delete(sid); });
+      req.on('close', () => { t.listeners.delete(res); if (!t.listeners.size && peerTails.get(sid) === t) peerTails.delete(sid); extUnwatched(sid); });
       return;
     }
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });

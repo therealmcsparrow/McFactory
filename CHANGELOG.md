@@ -4,6 +4,15 @@ All notable changes to this project are listed here.
 
 ## Unreleased
 
+### Added
+
+-   **Continue here**: a terminal or desktop session that is closed there keeps its chat panel. A message reopens it as a dashboard session (`claude --resume`), so messages, approvals and questions go straight through without approving them in the terminal. Refused while the session is still open in a terminal. An ended dashboard session continues the same way. `POST /api/chat/start` takes `{resume, prompt}`. See [Continue here](documentation/peer-chat.md#continue-here).
+
+### Changed
+
+-   Questions with choices (AskUserQuestion) from terminal and desktop sessions now show as a form in the dashboard by default. They are held only while that session's panel is open; otherwise the terminal asks at once, and a waiting question goes back to the terminal 3 seconds after you close the panel. `--no-ask-hook` (or `AICO_DASH_ASK=0`) turns it off. `--ask-hook` and `--with-ask` are no longer needed.
+-   `--install-hook` adds the AskUserQuestion hook too (`--no-ask` leaves it out). Run it again if you installed the hook before.
+
 ## 0.1.3 - 2026-11-17
 
 ### Added
