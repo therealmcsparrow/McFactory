@@ -140,7 +140,7 @@ export function makePatrols(OS: OfficeState) {
    *  as spawned cars do (over its first 3 m). Off-screen first, else where a road or roundabout arm joins (as if it came from there),
    *  else anywhere there; 60..90 m ahead only when 30..60 has no room (a roundabout or a queue there); never with another vehicle within 9 m. It drives out of town along the route, and the chase starts at once. */
   const nd = new THREE.Vector3();
-  const offScreen = (x: number, z: number) => { try { nd.set(x, .5, z).project(OS.ctx.camera); return Math.abs(nd.x) > 1.05 || Math.abs(nd.y) > 1.05; } catch (e) { return false; } };
+  const offScreen = (x: number, z: number) => { try { nd.set(x, .5, z).project(OS.ctx.view); return Math.abs(nd.x) > 1.05 || Math.abs(nd.y) > 1.05; } catch (e) { return false; } };
   let why = '';
   function spawnSpeeder() { const pats = T.filter(P => P.ph === 'cruise' && P.A.leg && P.A.k >= 1 && !P.A.ghost && pub(P.A.x, P.A.z) && !ringAt(P.A.x, P.A.z)); why = pats.length ? 'spot' : 'nopat';
     for (const P of pats) { const A = P.A, L = A.leg!, c: [number, number, number, number, LaneSample][] = []; if (L.ev.some(e => !e.done && e.wait && e.s - A.s < 30)) { why = 'line'; continue; }

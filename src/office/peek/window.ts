@@ -30,7 +30,7 @@ const D = 4, TILT = .12, NEAR = D - 1.4, FAR_NEAR = -600; // camera distance fro
 const OPEN = 1.2, SHUT = 1.5, TAIL = .6;                  // curtains opening, closing; the pause after the end
 
 export function makePeek(OS: { ctx: SceneCtx }, flats: Apartments): Peek {
-  const { camera, renderer, scene, controls } = OS.ctx;
+  const { camera, view, renderer, scene, controls } = OS.ctx;
   const canvas = renderer.domElement;
   // ── which story behind which window: one shuffle per page load ──
   const perm = [...STORIES.keys()];
@@ -41,7 +41,7 @@ export function makePeek(OS: { ctx: SceneCtx }, flats: Apartments): Peek {
   // ── picking: the first thing the ray meets in the complex must be a lit pane; on a click, nothing else in the scene may be in front ──
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
   const aim = (x: number, y: number) => { const r = canvas.getBoundingClientRect(); ndc.set((x - r.left) / r.width * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
-    ray.setFromCamera(ndc, camera); ray.ray.origin.addScaledVector(ray.ray.direction, camera.near); }; // from the (negative) near plane, as the stage does
+    ray.setFromCamera(ndc, view); ray.ray.origin.addScaledVector(ray.ray.direction, view.near); }; // from the render camera's near plane, as the stage does
   /** A solid mesh that is drawn (it and every parent visible; not a see-through glow). */
   const shows = (o: THREE.Object3D) => { if (!(o as THREE.Mesh).isMesh) return false; const m = (o as THREE.Mesh).material as THREE.Material;
     if (m && !Array.isArray(m) && m.transparent && m.opacity < .5) return false; for (let p: THREE.Object3D | null = o; p; p = p.parent) if (!p.visible) return false; return true; };
@@ -104,7 +104,7 @@ export function makePeek(OS: { ctx: SceneCtx }, flats: Apartments): Peek {
 
   const v = new THREE.Vector3(), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
   /** Sit the strip centred under the pane's bottom edge on screen, inside the viewport. */
-  function place() { if (!cur) return; const r = canvas.getBoundingClientRect(); v.copy(cur.at).addScaledVector(camera.up, -PH / 2).project(camera);
+  function place() { if (!cur) return; const r = canvas.getBoundingClientRect(); v.copy(cur.at).addScaledVector(camera.up, -PH / 2).project(view);
     const sx = r.left + (v.x + 1) / 2 * r.width, sy = r.top + (1 - v.y) / 2 * r.height, w = el.offsetWidth, h = el.offsetHeight, G = 16;
     const x = Math.max(G, Math.min(innerWidth - G - w, sx - w / 2)), y = Math.max(G, Math.min(innerHeight - G - h, sy + 18));
     el.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`; }
@@ -162,7 +162,7 @@ export function makePeek(OS: { ctx: SceneCtx }, flats: Apartments): Peek {
           if (w == null && k >= 0 && lit.length) { w = lit[0]; const j = perm.indexOf(k), at = ((w + off) % perm.length); [perm[at], perm[j]] = [perm[j], perm[at]]; } }
         if (w != null) { last = performance.now(); open(w); } }
       else if (cmd === 'seek' && cur && typeof a === 'number') { cur.t = a; cur.beat = -1; draw(); }
-      else if (cmd === 'where') { const r = canvas.getBoundingClientRect(); return { ...state(), at: [...Array(flats.windows).keys()].filter(flats.isLit).map(i => { const p = flats.windowAt(i); v.set(p.x, p.y, p.z).project(camera);
+      else if (cmd === 'where') { const r = canvas.getBoundingClientRect(); return { ...state(), at: [...Array(flats.windows).keys()].filter(flats.isLit).map(i => { const p = flats.windowAt(i); v.set(p.x, p.y, p.z).project(view);
         return [i, Math.round(r.left + (v.x + 1) / 2 * r.width), Math.round(r.top + (1 - v.y) / 2 * r.height), p.nx * (camera.position.x - p.x) + p.nz * (camera.position.z - p.z) > 0 ? 1 : 0]; })
           .map(([i, x, y, f]) => [i, x, y, f, winUnder(x, y, true) === i ? 1 : 0]) }; } // [window, x, y, faces the camera, clickable there]
       return state();

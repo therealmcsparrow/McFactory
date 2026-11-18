@@ -4,6 +4,12 @@ All notable changes to this project are listed here.
 
 ## Unreleased
 
+## 0.1.9 - 2026-11-18
+
+### Changed
+
+-   Factory and office views: the 3D view is drawn in real perspective. Before, it used an orthographic (flat isometric) projection, where far things never shrink, so long buildings and roads looked as if they widened or pinched towards the back. A narrow 24° lens keeps the overview close to isometric, and zooming, focusing, the desk view and the window peek work as before. The lens is `fov` in `APP` (`src/app/main.ts`).
+
 ## 0.1.8 - 2026-11-18
 
 ### Added
