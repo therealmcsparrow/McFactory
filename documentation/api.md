@@ -73,7 +73,7 @@ Each task in `/api/state` has `mode`: `brainstorm`, `cooler` or `null`. It is se
 | Method and path | Token | Body and answer |
 |-----------------|-------|-----------------|
 | `POST /hook/permission` | no (loopback only) | Called by Claude Code's PermissionRequest hook. Held until answered; see [Answer prompts from the dashboard](permission-hook.md). |
-| `POST /hook/pretool` | no (loopback only) | Called by the PreToolUse hook for AskUserQuestion. Held only while a chat panel or prompt card of that session is open, otherwise answered empty at once. Off with `--no-ask-hook`. |
+| `POST /hook/pretool` | no (loopback only) | Called by the PreToolUse hook for AskUserQuestion. Taken only while a dashboard page is open (`/api/stream`) or a panel of that session, otherwise answered empty at once. Once taken, held until answered with `/api/ext/:sid/answer`, until the hook request closes, or until the process ends. Off with `--no-ask-hook`. |
 | `GET /api/ext/:sid/stream?token=` | yes | Event stream of hook prompts for a session. |
 | `POST /api/ext/:sid/answer` | yes | `{id, behavior: "allow"\|"deny", answers?, message?}`. `answers` as for dashboard sessions, for a question. |
 

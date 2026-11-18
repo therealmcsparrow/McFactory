@@ -56,7 +56,7 @@
 
   // ───────── owned sessions seen in the snapshot (flags only; text comes from the chat stream)
   let owned = new Map<string, { task: Task; project: Project }>();   // taskId -> {task, project}
-  let needy: Task[] = [];          // owned tasks with a pending request
+  let needy: Task[] = [];          // owned tasks with a pending request, then terminal/desktop sessions with a held question
   let wantFocus: string | null = null;    // session id we should open once it shows up on the floor
   let wantFocusAt = 0;
   const taskOfDetail = (d: Detail) => {
@@ -75,8 +75,9 @@
     const shown = needy.filter(t => !(cur && cur.id === t.id && !panel.hidden));
     if (shown.length) {
       const t = shown[0], more = shown.length > 1 ? ` (+${shown.length - 1} more)` : '';
-      alertBtn.replaceChildren(h('b', { text: 'Chat needs you' }), h('span', { text: (t.title || 'session') + more }));
-      alertBtn.setAttribute('aria-label', `A dashboard chat session needs you: ${t.title || 'session'}${more}. Open the chat.`);
+      const q = !t.owned; // a terminal/desktop session with a question held for the dashboard
+      alertBtn.replaceChildren(h('b', { text: q ? 'Question for you' : 'Chat needs you' }), h('span', { text: (t.title || 'session') + more }));
+      alertBtn.setAttribute('aria-label', `${q ? 'A session asks you a question' : 'A dashboard chat session needs you'}: ${t.title || 'session'}${more}. Open the chat.`);
       alertBtn.hidden = false; alertBtn.dataset.id = t.id;
     } else alertBtn.hidden = true;
     const k = kpi(); if (k) {
@@ -91,7 +92,7 @@
   function tryWanted(force?: boolean) {
     if (!wantFocus) return;
     if (Date.now() - wantFocusAt > 60e3) { wantFocus = null; return; }
-    if (!owned.has(wantFocus)) return;
+    if (!owned.has(wantFocus) && !extTasks.has(wantFocus) && !sessTasks.has(wantFocus)) return;
     const id = wantFocus;
     if (typeof window.__focus === 'function' && (!cur || cur.id !== id || force)) window.__focus('task', id);
     focusOnReady = true; wantFocus = null; if (cur && cur.id === id) maybeFocus();
@@ -354,7 +355,7 @@
   const extPanel = h('section', { id: 'ext-prompt', class: 'chat ext', 'aria-label': 'Prompt waiting for you', hidden: true },
     h('div', { class: 'chat-head', 'data-s': 'ask' }, h('i', { class: 'dot' }), h('span', { class: 'grow2', text: 'Needs you' })),
     extPend, extErr,
-    h('div', { class: 'chat-note', text: 'Terminal or desktop session. You can also answer there: the first answer wins, this card clears when the session moves on.' }));
+    h('div', { class: 'chat-note', text: 'Terminal or desktop session. A permission prompt can also be answered there (the first answer wins); a question waits here until you answer it.' }));
   detailEl?.append(extPanel);
   let ecur: ExtCur | null = null; // {id, es, key}
   function closeExt() { if (ecur && ecur.es) ecur.es.close(); ecur = null; }
@@ -520,6 +521,7 @@
     peerTasks = pt;
     const st = new Set<string>(); for (const p of state.projects) for (const t of p.tasks) if (!t.owned) st.add(t.id);
     sessTasks = st;
+    for (const t of x.values()) n.push(t); // a terminal/desktop question held for the dashboard: the alert opens its panel
     owned = m; needy = n; updateAlert(); tryWanted(); refreshDetail();
   });
 })();

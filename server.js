@@ -46,7 +46,9 @@ const MAX_HOURS = 24 * 31;
 // Claude Code http hooks POST here and block until we answer. Fail-open: server down = normal flow.
 const HOOK_ON = !argv.includes('--no-hook');                                   // --no-hook: hook endpoints answer empty at once
 const HOOK_ASK = !argv.includes('--no-ask-hook') && process.env.AICO_DASH_ASK !== '0'; // AskUserQuestion via PreToolUse: held only while a dashboard panel shows that session
-const HOOK_TIMEOUT_S = 300, HOOK_HOLD_MS = +process.env.AICO_DASH_HOLD_MS || 280e3;                              // settings timeout, and when we give up first (empty 200)
+const HOOK_TIMEOUT_S = 300, HOOK_HOLD_MS = +process.env.AICO_DASH_HOLD_MS || 280e3;                              // permission hook: settings timeout, and when we give up first (empty 200)
+// question hook: held until answered in the dashboard, so its settings timeout is long (24 h); we let go just before it
+const ASK_TIMEOUT_S = 86400, ASK_HOLD_MS = +process.env.AICO_DASH_ASK_HOLD_MS || (ASK_TIMEOUT_S - 60) * 1000;
 const HOOK_URL_RE = /^http:\/\/127\.0\.0\.1:\d+\/hook\/(permission|pretool)$/;  // marks entries that are ours
 function hookCli() {
   const install = argv.includes('--install-hook');
@@ -74,7 +76,7 @@ function hookCli() {
     const base = 'http://127.0.0.1:' + PORT + '/hook/';
     const add = (ev, entry) => { cfg.hooks = cfg.hooks && typeof cfg.hooks === 'object' ? cfg.hooks : {}; (cfg.hooks[ev] = Array.isArray(cfg.hooks[ev]) ? cfg.hooks[ev] : []).push(entry); };
     add('PermissionRequest', { hooks: [{ type: 'http', url: base + 'permission', timeout: HOOK_TIMEOUT_S }] });
-    if (!argv.includes('--no-ask')) add('PreToolUse', { matcher: 'AskUserQuestion', hooks: [{ type: 'http', url: base + 'pretool', timeout: HOOK_TIMEOUT_S }] });
+    if (!argv.includes('--no-ask')) add('PreToolUse', { matcher: 'AskUserQuestion', hooks: [{ type: 'http', url: base + 'pretool', timeout: ASK_TIMEOUT_S }] });
   }
   const tmp = file + '.aico-tmp';
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -1036,13 +1038,10 @@ function extFinish(p, out) { // out = hook JSON, or null for "no decision"
   if (!res.writableEnded && !res.destroyed) { try { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(out ? JSON.stringify(out) : ''); } catch { } }
   extTouch(p.sid);
 }
-// A held question blocks the terminal (its dialog only shows once the hook returns), so it is held only while someone
-// looks at that session in the dashboard: its chat panel (peer stream) or its prompt card (ext stream) is open.
-const UNWATCH_MS = 3000; // a reconnect (Refresh, a dropped stream) does not hand the question back at once
-function extWatched(sid) { const t = peerTails.get(sid), ls = extListeners.get(sid); return !!((t && t.listeners.size) || (ls && ls.size)); }
-function extUnwatched(sid) { // a panel closed: once nobody looks, held questions go back to the terminal
-  setTimeout(() => { if (extWatched(sid)) return; const m = ext.get(sid); if (m) for (const p of [...m.values()]) if (p.kind === 'ask') extFinish(p, null); }, +process.env.AICO_DASH_UNWATCH_MS || UNWATCH_MS);
-}
+// A held question blocks the terminal (its dialog only shows once the hook returns), so it is only taken while a dashboard
+// is open (any page on /api/stream, or a panel of that session): the page shows the Needs you alert. Once taken it stays
+// until it is answered here, the session interrupts the tool (Esc: the hook request closes) or the Claude process ends.
+function dashOpen(sid) { const t = peerTails.get(sid), ls = extListeners.get(sid); return clients.size > 0 || !!((t && t.listeners.size) || (ls && ls.size)); }
 function sessionLines(sid) { let n = 0; for (const a of agents.values()) if (a.sessionId === sid) n += a.nl || 0; return n; }
 function extSweep() { // called every pump (1s): release prompts the terminal already settled
   if (!ext.size || process.env.AICO_DASH_NO_SWEEP) return; // NO_SWEEP: tests only
@@ -1051,6 +1050,7 @@ function extSweep() { // called every pump (1s): release prompts the terminal al
     const age = now - p.ts; if (age < EXT_GRACE) continue;
     const ls = live && live.get(sid);
     if (live !== null && !ls) { extFinish(p, null); continue; }                 // the Claude process is gone
+    if (p.kind === 'ask') continue;                                             // only the dashboard can answer a held question
     if (p.base === null) p.base = sessionLines(sid);
     if (ls && ls.status === 'waiting') p.sawWaiting = true;
     else if (ls && p.sawWaiting) { extFinish(p, null); continue; }              // was waiting, now busy/idle: answered elsewhere
@@ -1080,14 +1080,14 @@ async function hookRoute(req, res, u) {
     if (!HOOK_ON || !SID_RE.test(sid) || !tool || chats.has(sid) || (ext.get(sid) || { size: 0 }).size >= 8 || [...ext.values()].reduce((n, m) => n + m.size, 0) >= MAX_EXT) return empty();
     const input = b.tool_input && typeof b.tool_input === 'object' ? b.tool_input : {};
     let kind = 'perm', questions = null;
-    if (pre) { // AskUserQuestion only, when switched on, and only while a dashboard panel shows this session
-      if (!HOOK_ASK || tool !== 'AskUserQuestion' || !extWatched(sid)) return empty(); // nobody looking: the terminal asks at once
+    if (pre) { // AskUserQuestion only, when switched on, and only while a dashboard is open
+      if (!HOOK_ASK || tool !== 'AskUserQuestion' || !dashOpen(sid)) return empty(); // no dashboard open: the terminal asks at once
       questions = cleanQuestions(input.questions); if (!questions) return empty(); kind = 'ask';
     } else if (tool === 'AskUserQuestion') return empty(); // a question is not an Allow/Deny prompt
     const p = { id: crypto.randomBytes(8).toString('hex'), sid, kind, tool_name: clip(tool, 100), summary: kind === 'ask' ? clip(questions[0].question, 200) : extSummary(tool, input),
       questions, input: null, ts: Date.now(), res, timer: null, done: false, base: null, sawWaiting: false };
     if (kind === 'ask') p.input = input; // the full input is needed to echo updatedInput; never sent to the browser
-    p.timer = setTimeout(() => extFinish(p, null), HOOK_HOLD_MS);
+    p.timer = setTimeout(() => extFinish(p, null), kind === 'ask' ? ASK_HOLD_MS : HOOK_HOLD_MS);
     res.on('close', () => extFinish(p, null));  // hook gone (claude exited / hook timed out): drop the card
     let m = ext.get(sid); if (!m) ext.set(sid, m = new Map()); m.set(p.id, p);
     extTouch(sid);
@@ -1106,7 +1106,7 @@ async function extRoute(req, res, u) {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' });
       res.write('retry: 2000\n\n'); sse(res, 'meta', extMeta(m[1]));
       let ls = extListeners.get(m[1]); if (!ls) extListeners.set(m[1], ls = new Set()); ls.add(res);
-      req.on('close', () => { ls.delete(res); if (!ls.size && extListeners.get(m[1]) === ls) extListeners.delete(m[1]); extUnwatched(m[1]); }); return;
+      req.on('close', () => { ls.delete(res); if (!ls.size && extListeners.get(m[1]) === ls) extListeners.delete(m[1]); }); return;
     }
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
     if (!tokenOk(req.headers['x-chat-token'])) return sendJson(res, 403, { error: 'bad token' });
@@ -1303,7 +1303,7 @@ async function peerRoute(req, res, u) {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' });
       res.write('retry: 2000\n\n'); sse(res, 'init', { meta: t.meta, log: t.log });
       t.listeners.add(res);
-      req.on('close', () => { t.listeners.delete(res); if (!t.listeners.size && peerTails.get(sid) === t) peerTails.delete(sid); extUnwatched(sid); });
+      req.on('close', () => { t.listeners.delete(res); if (!t.listeners.size && peerTails.get(sid) === t) peerTails.delete(sid); });
       return;
     }
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });

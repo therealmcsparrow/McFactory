@@ -72,12 +72,13 @@ Anything doubtful ends this way, so the worst case is answering in the terminal 
 
 When Claude asks you a question with choices in a terminal or desktop session, the dashboard shows it as the same form you get in a dashboard chat: options, "Other" with your own text, and **Send answer** / **Skip**.
 
-A PreToolUse hook runs before the tool, so the terminal shows its own question only after the hook returns. That is why the server holds a question **only while you look at that session in the dashboard**: its chat panel or its prompt card is open.
+A PreToolUse hook runs before the tool, so the terminal shows its own question only after the hook returns. That is why the server takes a question **only while a dashboard page is open** (the browser page or the desktop app, on any view).
 
-- Nobody looks: the hook answers empty at once and the terminal asks as usual. Nothing waits.
-- The panel is open: the form shows in the dashboard. The terminal waits until you answer or skip there. Press Esc in the terminal to cancel it there instead.
-- You close the panel, or switch to another session, while a question waits: after 3 seconds it goes back to the terminal.
-- The release rules above (process gone, transcript moved on, 280 seconds) still apply.
+- No dashboard open: the hook answers empty at once and the terminal asks as usual. Nothing waits.
+- A dashboard is open: the blue **Question for you** alert shows. Click it to open that session's panel with the form. The panel does not need to be open when Claude asks.
+- The question then waits in the dashboard until you answer or skip it there. Closing the panel or the page does not send it back; it is still there when you open the dashboard again. Meanwhile the terminal and claude.ai show nothing.
+- It clears without an answer only when Claude Code drops it: you press Esc in the terminal, or the Claude process ends.
+- The question hook's timeout is 86400 seconds (24 hours). Claude Code enforces this timeout, so `--install-hook` writes it. A hook installed before 0.1.7 has 300 seconds: run `node server.js --install-hook` again and restart the session, or the question goes back to the terminal after 5 minutes.
 
 The server has this on by default. `node server.js --no-ask-hook` (or `AICO_DASH_ASK=0`) turns it off: every question is then answered in the terminal only.
 
