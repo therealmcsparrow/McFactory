@@ -106,11 +106,11 @@ class Harness {
     return { path: p, got, close: () => new Promise(r => srv.close(r)) };
   }
   // fake live session: a sleeper process gives a real pid; writes <pid>.json and (unless key === null) <pid>.<64hex>.key
-  session({ sid = crypto.randomUUID(), pipe, key = hex(32), status = 'idle', pid, entrypoint = 'cli' } = {}) {
+  session({ sid = crypto.randomUUID(), pipe, key = hex(32), status = 'idle', pid, entrypoint = 'cli', bridge } = {}) {
     let sleeper = null;
     if (!pid) { sleeper = spawn(process.execPath, ['-e', 'setInterval(()=>{},1e9)'], { stdio: 'ignore' }); this.sleepers.push(sleeper); pid = sleeper.pid; }
     const file = path.join(this.sessions, pid + '.json');
-    fs.writeFileSync(file, JSON.stringify({ pid, sessionId: sid, cwd: this.dir, startedAt: Date.now(), kind: 'interactive', entrypoint, status, statusUpdatedAt: Date.now(), messagingSocketPath: pipe }));
+    fs.writeFileSync(file, JSON.stringify({ pid, sessionId: sid, cwd: this.dir, startedAt: Date.now(), kind: 'interactive', entrypoint, status, statusUpdatedAt: Date.now(), messagingSocketPath: pipe, bridgeSessionId: bridge }));
     let keyFile = null;
     if (key !== null) { keyFile = path.join(this.sessions, pid + '.' + hex(64) + '.key'); fs.writeFileSync(keyFile, JSON.stringify({ peerToken: key, procStartFt: 1, pidDomain: 'win' })); }
     return { sid, pid, key, file, keyFile, kill: () => { if (sleeper) sleeper.kill(); } };

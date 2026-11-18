@@ -39,7 +39,7 @@ A change in a transcript reaches an open page within about 0.2 seconds.
 
 | Method and path | Token | Body and answer |
 |-----------------|-------|-----------------|
-| `POST /api/chat/start` | yes | `{cwd, model, effort, prompt, skipPermissions?}` → `{id}` (the session ID). `skipPermissions` must be `true` or `false` when sent; anything else is 400. `cwd` must be an absolute path to an existing local folder. With `{resume: <session id>, prompt, model?, effort?}` instead of `cwd` it continues an existing session here (`claude --resume`), in the folder from its transcript, and the log starts with the conversation so far. 409 while that session is still open in a terminal or the desktop app, or already runs here; 404 no transcript. |
+| `POST /api/chat/start` | yes | `{cwd, model, effort, prompt, skipPermissions?}` → `{id}` (the session ID). `skipPermissions` must be `true` or `false` when sent; anything else is 400. `cwd` must be an absolute path to an existing local folder. `resume` is no longer accepted (400): use `POST /api/peer/:id/rc`. |
 | `POST /api/chat/:id/send` | yes | `{text}` |
 | `POST /api/chat/:id/answer` | yes | `{request_id, behavior: "allow"\|"deny", answers?, message?}`. `answers` is `{questionText: label}`; multi-select labels are joined by `", "`. |
 | `POST /api/chat/:id/stop` | yes | Stops the session. |
@@ -50,7 +50,11 @@ A change in a transcript reaches an open page within about 0.2 seconds.
 | Method and path | Token | Body and answer |
 |-----------------|-------|-----------------|
 | `POST /api/peer/:id/send` | yes | `{text, priority?: "next"\|"now"}` → `{ok: true}`. 400 bad input, 403 token, 404 not a live session, 429 too fast, 502 pipe or key problem. |
-| `GET /api/peer/:id/stream?token=` | yes | Event stream: `init {meta, log}`, then `entry` and `meta {live, canSend, status, entrypoint}` events. |
+| `GET /api/peer/:id/stream?token=` | yes | Event stream: `init {meta, log}`, then `entry` and `meta {live, canSend, status, entrypoint, rc, canClose, opening}` events. `rc` is the claude.ai Remote Control link or null. |
+| `POST /api/peer/:id/open` | yes | Opens the session's Remote Control link in the default browser → `{ok, url}`. 404 when Remote Control is off. |
+| `POST /api/peer/:id/rc` | yes | Closed session: opens a new terminal window running `claude --resume <id> --remote-control` in the folder from its transcript. 409 still open, no folder, or already opening; 404 no transcript. |
+| `POST /api/peer/:id/close` | yes | Ends the process that holds the session (a dashboard session: stops it). 404 no such process. |
+| `POST /api/peer/:id/dismiss` | yes | Hides a closed session from `/api/state` until it has new activity. 409 while it runs. |
 
 ## Subagent screens
 
