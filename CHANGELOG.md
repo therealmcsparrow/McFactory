@@ -4,6 +4,8 @@ All notable changes to this project are listed here.
 
 ## Unreleased
 
+## 0.1.6 - 2026-11-18
+
 ### Added
 
 -   **Remote Control** for terminal and desktop sessions. A session with `/rc` on shows **Open in Claude ↗**, which opens its claude.ai link. Without it, the panel says to type `/rc`. A closed session offers **Continue with Remote Control**: a new terminal window runs `claude --resume <id> --remote-control`, and its link opens once it is ready. See [Remote Control](documentation/peer-chat.md#remote-control).
