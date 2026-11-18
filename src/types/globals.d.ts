@@ -3,7 +3,7 @@ import type { DashSim } from '../common/types.js';
 
 declare global {
   /** settings.ts: the numeric settings (each has its own range and default). */
-  type FunNumKey = 'shopWalkers' | 'shopCars' | 'officeMax' | 'patrols' | 'dogWalkers' | 'kids';
+  type FunNumKey = 'shopWalkers' | 'shopCars' | 'officeMax' | 'patrols' | 'dogWalkers' | 'kids' | 'townsfolk';
   /** settings.ts: the "fun elements": on/off toggles (unknown keys read as true) and a few numbers (kept in their range). */
   interface FunSettings {
     get(key: FunNumKey): number; get(key: string): boolean;
@@ -16,6 +16,8 @@ declare global {
   /** office.js patrol(): the patrol state the Speeder button reads (more fields exist; only these are typed). */
   interface PatrolState { want: number; out: number; force: boolean; busy: boolean; stop: { phase: string } | null | undefined; [k: string]: unknown }
   interface OfficeProbe { robbery(cmd?: 'start' | 'soon' | 'head' | 'side'): RobberyState; patrol?(cmd?: 'speed'): PatrolState; [k: string]: unknown }
+  /** window.__dunes (dunes/index.ts): test probes, plus what the Duel and Abduction buttons read and call. */
+  interface DunesProbe { events(): { duel: string; abduct: string; rm: boolean; aliens: number }; duel(): boolean; abduct(): boolean; [k: string]: unknown }
   interface Window {
     DashSim: DashSim;
     CWFun: FunSettings;
@@ -24,7 +26,7 @@ declare global {
     /** the time window changed: reset the feed */
     __onWindow(): void;
     /** read-only test probes */
-    __fac?: Record<string, unknown>;
+    __fac?: Record<string, unknown>; __dunes?: DunesProbe;
     __office?: OfficeProbe;
     __crew?: Record<string, unknown>;
     __labObs?: unknown;

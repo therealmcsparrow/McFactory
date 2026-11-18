@@ -30,7 +30,7 @@
     <div class="sub"><span id="tot-cost">$0.00</span><span id="tot-rate">0/s</span><span id="tot-calls">0 tools</span></div>
     <svg id="spark" viewBox="0 0 260 30" preserveAspectRatio="none" role="img" aria-label="Token rate, last ten minutes"><path class="sp-area"/><path class="sp-line"/></svg>
     <div class="win" id="win" role="group" aria-label="Time window"></div>
-    <div class="win vsw" id="view" role="group" aria-label="View"><button type="button" data-view="factory">Factory</button><button type="button" data-view="office">Office</button></div>
+    <div class="win vsw" id="view" role="group" aria-label="View"><button type="button" data-view="factory">Factory</button><button type="button" data-view="office">Office</button><button type="button" data-view="dunes">Dunes</button></div>
     <div class="kpis">
       <div style="--c:var(--color-ok)"><b id="k-running">0</b><span>arms on</span></div>
       <div style="--c:var(--color-warn)"><b id="k-waiting">0</b><span>waiting</span></div>
@@ -67,7 +67,11 @@
   <section class="board rob-board" aria-label="Armoured car robbery">
     <div class="win"><button id="rob" class="brk" type="button" aria-label="Stage a robbery">Robbery</button><button id="spd" class="brk" type="button" aria-label="Send a speeder">Speeder</button></div>
   </section>
+  <section class="board dun-board" aria-label="Dunes events">
+    <div class="win"><button id="duel" class="brk" type="button" data-label="Duel" aria-label="Start a blade duel">Duel</button><button id="abd" class="brk" type="button" data-label="Abduction" aria-label="Start an abduction">Abduction</button></div>
+  </section>
   <script src="app/hud-office-button.js"></script>
+  <script src="app/hud-dunes-button.js"></script>
 </div>
 
 <section id="empty" class="board hz" hidden aria-live="polite">

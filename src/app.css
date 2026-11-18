@@ -222,6 +222,7 @@ h2 small{font:400 11px var(--font-mono);color:var(--color-ink-3);text-transform:
 .sign small{font:400 11px var(--font-mono);color:var(--color-ink-3);text-transform:none;letter-spacing:0}
 .sign.more{cursor:default;background:oklch(16% 0.006 260 / .75);color:var(--color-ink-2)}
 .sign.wh{flex-direction:column;align-items:flex-start;gap:0;padding:6px 10px;box-shadow:0 0 0 1px var(--color-signal)}
+.sign.dn{font-size:13px;box-shadow:0 0 0 1px var(--color-edge),inset 0 -2px 0 var(--c,transparent)}.sign.dn.ask{box-shadow:0 0 0 1px var(--color-human),inset 0 -2px 0 var(--c,transparent)}
 .sign.wh b{font:800 22px/1 var(--font-ui);font-variant-numeric:tabular-nums}
 .sign.fac{font-size:15px;box-shadow:0 0 0 1px var(--color-edge),inset 0 -2px 0 var(--c,transparent)}
 .sign.sub{flex-direction:column;align-items:flex-start;gap:0;padding:4px 9px;box-shadow:0 0 0 1px var(--c);opacity:0;pointer-events:none;transition:opacity .25s}
@@ -263,8 +264,9 @@ h2 small{font:400 11px var(--font-mono);color:var(--color-ink-3);text-transform:
 .cb .more2:empty{display:none}
 .sign .dot{width:8px;height:8px;border-radius:50%;background:currentColor;color:var(--color-ink-3);flex:none}
 .focus-label{font:500 11px var(--font-mono);background:var(--color-signal);color:oklch(18% 0 0);padding:3px 8px;border-radius:2px;white-space:nowrap;transform:translateY(-12px)}
-.brk-board,.rob-board{padding:6px}.brk-board .win,.rob-board .win{margin-top:0}
-.win.vsw{margin-top:4px}body.v-office .brk-board{display:none}
+.brk-board,.rob-board,.dun-board{padding:6px}.brk-board .win,.rob-board .win,.dun-board .win{margin-top:0}
+.dun-board{display:none}body.v-dunes .dun-board{display:block}.fun-off-duels #duel,.fun-off-abductions #abd,.fun-off-duels.fun-off-abductions .dun-board{display:none!important}
+.win.vsw{margin-top:4px}body.v-office .brk-board,body.v-dunes .brk-board{display:none}
 .rob-board{display:none}body.v-office .rob-board{display:block}.fun-off-robbery #rob{display:none!important}
 .win button.brk{font:500 11px var(--font-mono);text-transform:none;letter-spacing:0;padding:7px 0;color:var(--color-ink);display:flex;align-items:center;justify-content:center;gap:6px}
 .win button.brk[aria-disabled=true]{color:var(--color-ink-3);cursor:default;background:transparent}.win button.brk[aria-disabled=true]:hover{background:transparent;color:var(--color-ink-3)}

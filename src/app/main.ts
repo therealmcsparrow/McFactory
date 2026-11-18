@@ -1,10 +1,11 @@
-// Module entry: picks the view (factory or office), then starts the shared stage with that scene.
+// Module entry: picks the view (factory, office or dunes), then starts the shared stage with that scene.
 import * as THREE from 'three';
-import { OFFICE } from './view.js';
+import { OFFICE, DUNES } from './view.js';
 import './hud.js';
 import { startApp } from './stage.js';
 import { buildScene } from '../factory/index.js';
 import { buildOffice } from '../office/index.js';
+import { buildDunes } from '../dunes/index.js';
 
 const APP = {
   frustum: 30, exposure: .95, orbitSpeed: .3, minPolar: .45, maxPolar: 1.2, minZoom: .18, maxZoom: 5,
@@ -14,4 +15,5 @@ const APP = {
 };
 // the office scene gets the camera frustum (its desk view fits to it); maxZoom is high for the view from a desk
 if (OFFICE) startApp(ctx => buildOffice(ctx, { frustum: APP.frustum }), { ...APP, minZoom: .04, maxZoom: 48 });
+else if (DUNES) startApp(buildDunes, { ...APP, minZoom: .1, maxZoom: 6, exposure: .8, bloom: { strength: .3, radius: .35, threshold: 1.9 } });
 else startApp(buildScene, APP);

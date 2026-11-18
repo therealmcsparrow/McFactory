@@ -25,7 +25,7 @@ It runs on your own computer and reads `~/.claude/projects`. Your session data n
 ## Features
 
 - **See everything at a glance.** Halls, lines and arms show which sessions and agents are running, waiting or done. Arm colours show role, model and effort. Totals for tokens, estimated cost and tools are always on screen.
-- **Two scenes.** Switch to the office view for the same data as office buildings, desks and people. Click a person to see their screen.
+- **Three scenes.** Switch to the office view for the same data as office buildings, desks and people (click a person to see their screen), or to the dunes view: moisture farms on a desert planet, with hover-sleds hauling water to the depot.
 - **Needs you.** A blue beacon and signs show when a session waits for your answer or approval.
 - **Start and chat with sessions.** Start a new Claude Code session in any folder, then chat with it, answer its permission prompts and questions, and use its slash commands.
 - **Talk to terminal and desktop sessions.** Send messages to sessions you started in the Claude CLI or the desktop app.
@@ -60,6 +60,18 @@ Options, environment variables and tests are in [Getting started](documentation/
 
 ## Screenshots
 
+**Three scenes, one dataset.** Switch between the factory, the office and the dunes from the panel at the top left.
+
+| Office | Dunes |
+| --- | --- |
+| ![The office view: lit office blocks on a street grid round the bank](documentation/images/office.png) | ![The dunes view: moisture farms on the dunes round a desert town](documentation/images/dunes.png) |
+
+**Out on the dunes.** Each farm flies its name on two banners by the homestead door. Now and then two blade fighters duel on the sand or a saucer beams someone up from town; the **Duel** and **Abduction** buttons start one right away.
+
+| A homestead | A duel | An abduction |
+| --- | --- | --- |
+| ![A homestead with a name banner either side of the door](documentation/images/dunes-farm.png) | ![Two robed fighters crossing glowing blades](documentation/images/dunes-duel.png) | ![A saucer beaming a townsperson up over the town](documentation/images/dunes-abduction.png) |
+
 **A session up close.** Click a line for its session card: agents, tokens, cost and status. The session that needs you glows blue.
 
 ![A session card listing its agents, next to the line with its robot arms](documentation/images/session.png)
@@ -75,6 +87,7 @@ Options, environment variables and tests are in [Getting started](documentation/
 | [Getting started](documentation/getting-started.md) | Requirements, starting the server, options, tests |
 | [The factory view](documentation/factory-view.md) | What every hall, line, arm and crate means |
 | [The office view](documentation/office-view.md) | The second scene: buildings, desks, people, the bank |
+| [The dunes view](documentation/dunes-view.md) | The third scene: farms, condenser towers, sleds, the depot |
 | [Chat and new sessions](documentation/chat.md) | Starting sessions from the dashboard and chatting with them |
 | [Terminal and desktop sessions](documentation/peer-chat.md) | Sending messages to sessions you started elsewhere |
 | [Answer prompts from the dashboard](documentation/permission-hook.md) | The global permission hook |
