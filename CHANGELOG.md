@@ -4,6 +4,12 @@ All notable changes to this project are listed here.
 
 ## Unreleased
 
+## 0.1.5 - 2026-11-18
+
+### Fixed
+
+-   Office view: no more crowd of workers by the manager's office after the window was minimised or hidden. Subagents that started and finished while nobody was looking no longer get a figure that has to walk out, and people who finish at their desk while the window is hidden are simply gone when you look again, instead of queueing at the exit.
+
 ## 0.1.4 - 2026-11-17
 
 ### Added
