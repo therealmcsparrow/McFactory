@@ -68,10 +68,11 @@ test('settings: CWFun keeps numbers in range, with typed defaults, and saves the
   assert.deepEqual(seen.filter(s => s[0] !== 'officeMax'), [['shopCars', 7], ['shopWalkers', 0]]);
   assert.deepEqual(JSON.parse(JSON.stringify(events.slice(-2))), [{ key: 'shopCars', value: 7 }, { key: 'shopWalkers', value: 0 }], 'the cw-fun event carries numbers too');
   const saved = JSON.parse(store.get('cw.fun')); assert.equal(saved.patrols, 2, 'patrols saved too');
-  assert.deepEqual(Object.fromEntries(Object.entries(saved).filter(([k]) => k !== 'patrols' && k !== 'dogWalkers' && k !== 'kids')), { breakdowns: true, robbery: false, shops: true, shopWalkers: 0, shopCars: 7, officeMax: 50 }, 'saved in this browser');
+  assert.deepEqual(Object.fromEntries(Object.entries(saved).filter(([k]) => k !== 'patrols' && k !== 'dogWalkers' && k !== 'kids' && k !== 'townsfolk')),{ breakdowns: true, robbery: false, shops: true, shopWalkers: 0, shopCars: 7, officeMax: 50 }, 'saved in this browser');
   assert.equal(F.get('patrols'), 2, 'default: two patrol cars'); F.set('patrols', 9); assert.equal(F.get('patrols'), 4, 'at most four');
   assert.equal(F.get('dogWalkers'), 6, 'default: six dog walkers'); F.set('dogWalkers', 50); assert.equal(F.get('dogWalkers'), 20, 'at most twenty');
   assert.equal(F.get('kids'), 12, 'default: twelve kids'); F.set('kids', 40); assert.equal(F.get('kids'), 16, 'at most sixteen'); F.set('kids', -1); assert.equal(F.get('kids'), 0, '0: an empty playground');
+  assert.equal(F.get('townsfolk'), 24, 'default: 24 townsfolk'); F.set('townsfolk', 99); assert.equal(F.get('townsfolk'), 40, 'at most forty');
   assert.ok(classes.has('fun-off-robbery') && ![...classes].some(c => /shop(Walkers|Cars)/.test(c)), 'CSS hooks for toggles only');
 });
 
@@ -92,8 +93,8 @@ test('without a build the page says to run npm run build', async () => {
   const proc = spawn(process.execPath, [path.join(ROOT, 'server.js'), '--port', String(port), '--root', h.projects, '--no-hook', '--static', empty], { stdio: ['ignore', 'pipe', 'pipe'] });
   let out = ''; proc.stdout.on('data', d => { out += d; }); proc.stderr.on('data', d => { out += d; });
   try {
-    assert.ok(await until(() => /factory/.test(out), 8000), 'server did not start: ' + out);
-    assert.match(out, /Run "npm run build"/);
+    // stdout and stderr arrive separately, so wait for both lines rather than assuming their order
+    assert.ok(await until(() => /factory/.test(out) && /Run "npm run build"/.test(out), 8000), 'server did not start with the build warning: ' + out);
     const r = await new Promise((res, rej) => http.get({ host: '127.0.0.1', port, path: '/' }, s => { let b = ''; s.on('data', d => { b += d; }); s.on('end', () => res({ status: s.statusCode, body: b })); }).on('error', rej));
     assert.equal(r.status, 503); assert.match(r.body, /npm run build/);
   } finally { proc.kill(); await new Promise(r => proc.once('exit', r)); await h.stop(); fs.rmSync(empty, { recursive: true, force: true }); }

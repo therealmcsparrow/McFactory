@@ -4,14 +4,15 @@
  * Toggles are booleans; unknown keys read as true. Numeric keys (NUM) read as a whole number in their range, their
  * default until set: shopWalkers (shoppers on foot at once, 0..30, 12), shopCars (shop vehicles at once, 0..20, 20),
  * officeMax (offices drawn in the office view, 12..100, 50), patrols (patrol cars cruising the office town, 0..4, 2),
- * dogWalkers (dog walkers on the office town's sidewalks at once, 0..20, 6), kids (kids in the office park's playground at once, 0..16, 12).
+ * dogWalkers (dog walkers on the office town's sidewalks at once, 0..20, 6), kids (kids in the office park's playground at once, 0..16, 12),
+ * townsfolk (people walking the dunes town, 0..40, 24).
  * Plain script in <head>: defined before chat.js, usage.js, the main module and office.js run. */
 window.CWFun = (() => {
   'use strict';
   type Val = boolean | number;
   // NUM: [min, max, default]. shopCars' max is the number of spots in use at the shops (SHOP_SPOTS in office/buildings/shops.ts);
   // officeMax's max is the number of cells in the office grid (MAXOFF in office/layout.ts)
-  const LSK = 'cw.fun', DEF: Record<string, boolean> = { breakdowns: true, robbery: true, shops: true }, NUM: Record<string, [number, number, number]> = { shopWalkers: [0, 30, 12], shopCars: [0, 20, 20], officeMax: [12, 100, 50], patrols: [0, 4, 2], dogWalkers: [0, 20, 6], kids: [0, 16, 12] };
+  const LSK = 'cw.fun', DEF: Record<string, boolean> = { breakdowns: true, robbery: true, shops: true }, NUM: Record<string, [number, number, number]> = { shopWalkers: [0, 30, 12], shopCars: [0, 20, 20], officeMax: [12, 100, 50], patrols: [0, 4, 2], dogWalkers: [0, 20, 6], kids: [0, 16, 12], townsfolk: [0, 40, 24] };
   const fns: ((key: string, value: Val) => void)[] = [];
   const isNum = (k: string) => Object.prototype.hasOwnProperty.call(NUM, k);
   const fit = (k: string, v: unknown): number => { const [a, b, d] = NUM[k], n = typeof v === 'number' && isFinite(v) ? Math.round(v) : d; return Math.min(b, Math.max(a, n)); };
@@ -40,13 +41,15 @@ window.CWFun = (() => {
   return api;
 })();
 // Settings dialog: a button next to Usage (in .chat-acts, which chat.js builds) opens a modal <dialog> with one checkbox per toggle
-// and a slider per number (shown under the toggle it belongs to, with its current value)
+// and a slider per number (shown under the toggle it belongs to, with its current value). Only the open view's group is shown.
 document.addEventListener('DOMContentLoaded', () => {
-  const F = window.CWFun, view = document.body.classList.contains('v-office') ? 'office' : 'factory';
+  const F = window.CWFun, cl = document.body.classList, view = cl.contains('v-office') ? 'office' : cl.contains('v-dunes') ? 'dunes' : 'factory';
   type Row = [string, string] | [string, string, number, number]; // a toggle [key, label], or a number [key, label, min, max]
   const GROUPS: [string, string, Row[]][] = [['factory', 'Factory', [['breakdowns', 'Breakdowns, tow truck and repair shop']]],
     ['office', 'Office', [['officeMax', 'Offices in town, at most', 12, 100], ['robbery', 'Armoured car robberies (police and SWAT respond)'], ['patrols', 'Patrol cars', 0, 4], ['shops', 'Shops and shoppers'],
-      ['shopWalkers', 'Shoppers on foot, at most', 0, 30], ['shopCars', 'Shop vehicles (cars and motorcycles), at most', 0, 20], ['dogWalkers', 'Dog walkers, at most', 0, 20], ['kids', 'Kids in the park, at most', 0, 16]]]];
+      ['shopWalkers', 'Shoppers on foot, at most', 0, 30], ['shopCars', 'Shop vehicles (cars and motorcycles), at most', 0, 20], ['dogWalkers', 'Dog walkers, at most', 0, 20], ['kids', 'Kids in the park, at most', 0, 16]]],
+    ['dunes', 'Dunes', [['townsfolk', 'Townsfolk in town, at most', 0, 40], ['port', 'Spaceport traffic'], ['flybys', 'Ship flybys'], ['duels', 'Blade duels'], ['abductions', 'Saucer abductions']]]];
+  const mine = GROUPS.filter(g => g[0] === view); // only the open view's settings
   const SHOPN = ['shopWalkers', 'shopCars']; // the sliders that go with the shops toggle
   const row = (r: Row) => r.length === 2 ? `<label class="cf-t"><input type="checkbox" data-k="${r[0]}"><span>${r[1]}</span></label>`
     : `<div class="cf-n"><label for="cf-${r[0]}">${r[1]}</label><output id="cf-${r[0]}-v" for="cf-${r[0]}" aria-hidden="true"></output>`
@@ -54,8 +57,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const dlg = document.createElement('dialog'); dlg.className = 'cf'; dlg.setAttribute('aria-labelledby', 'cf-title');
   dlg.innerHTML = '<div class="cf-box"><div class="cf-head"><h2 id="cf-title">Settings</h2><button type="button" class="us-x cf-x" aria-label="Close settings"></button></div>'
     + '<p class="cf-note">Fun elements. Changes apply at once and are saved in this browser only.</p>'
-    + GROUPS.map(([v, name, items]) => `<fieldset class="cf-grp" data-view="${v}"><legend>${name}${v === view ? ' <small>this view</small>' : ''}</legend>`
-      + items.map(row).join('') + '</fieldset>').join('')
+    + (mine.length ? mine.map(([v, name, items]) => `<fieldset class="cf-grp" data-view="${v}"><legend>${name}</legend>`
+      + items.map(row).join('') + '</fieldset>').join('') : '<p class="cf-note cf-none">This view has no settings yet.</p>')
     + '</div>';
   document.body.append(dlg);
   const boxes = [...dlg.querySelectorAll<HTMLInputElement>('input[data-k]')], nums = [...dlg.querySelectorAll<HTMLInputElement>('input[data-n]')];
@@ -68,7 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
   btn.id = 'settings-open'; btn.type = 'button'; btn.className = 'chat-new chat-ref'; btn.title = 'Settings: fun elements'; btn.setAttribute('aria-haspopup', 'dialog');
   btn.innerHTML = '<span aria-hidden="true"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 3h9M1.5 9h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/><circle cx="4" cy="3" r="1.6" fill="var(--color-raise)" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="9" r="1.6" fill="var(--color-raise)" stroke="currentColor" stroke-width="1.3"/></svg></span><span class="lbl">Settings</span>';
   const acts = document.querySelector('.chat-acts'); (acts || document.querySelector('#win')?.parentNode || document.body).append(btn);
-  btn.addEventListener('click', () => { sync(); dlg.showModal(); (dlg.querySelector<HTMLInputElement>(`.cf-grp[data-view="${view}"] input`) || boxes[0]).focus(); });
+  btn.addEventListener('click', () => { sync(); dlg.showModal(); (dlg.querySelector<HTMLElement>('.cf-grp input') || dlg.querySelector<HTMLElement>('.cf-x'))!.focus(); });
   dlg.querySelector('.cf-x')!.addEventListener('click', () => dlg.close());
   dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); }); // backdrop click
   dlg.addEventListener('keydown', e => { if (e.key === 'Escape') e.stopPropagation(); }); // Esc closes the dialog only, not the focused hall too

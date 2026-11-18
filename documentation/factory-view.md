@@ -2,6 +2,8 @@
 
 The page draws your Claude Code activity as an isometric factory. Everything on it comes from the session transcripts in `~/.claude/projects` and the session files in `~/.claude/sessions`.
 
+![The factory floor: five project halls with conveyor lines round the central warehouse, the parking and repair bays, and the HUD panels on either side](images/floor.png)
+
 ## What you see
 
 | On screen | What it stands for |
@@ -80,6 +82,6 @@ The **Refresh** button beside New session rescans the session and transcript fol
 
 ## Settings
 
-The **Settings** button beside Usage opens a dialog with fun elements, one group per view. Changes apply at once, without a reload, and are saved in this browser only.
+The **Settings** button beside Usage opens a dialog with the fun elements of the view you are in; the other views' settings show when you switch to them. Changes apply at once, without a reload, and are saved in this browser only.
 
 - **Breakdowns, tow truck and repair shop** (on by default): now and then a robot breaks down, a tow truck takes it to the repair garage and mechanics fix it. The **Break down** button forces one. When off, no robot breaks down, and the garage, its Repair sign, the tow truck and the Break down button are hidden. A breakdown in progress ends at once: the robot is repaired and drives out of the garage door.

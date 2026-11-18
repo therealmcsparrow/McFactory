@@ -1,6 +1,6 @@
 [package]
 name = "mcfactory"
-version = "0.1.9"
+version = "0.1.10"
 description = "McFactory desktop app: the factory dashboard in a window, with server.js as a sidecar"
 edition = "2021"
 publish = false

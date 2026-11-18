@@ -1,7 +1,7 @@
 import { $, reduced } from '../common/dom.js';
 import { DS, fmt, costTxt, bandsHTML, projById, modelOf, effLabel, needTxt, agentIndex, taskById, pillOf, costCell, pillSm, armOrder, NEED_TXT, STATUS } from './data.js';
 import { setText, esc, hhmmss, cut, clock } from '../common/text.js';
-import { OFFICE, WORD } from './view.js';
+import { OFFICE, DUNES, WORD } from './view.js';
 import { damp } from '../common/math.js';
 import type { AppApi, DashEvent, Pick as PickT } from '../common/types.js';
 
@@ -29,6 +29,15 @@ function renderLegend() {
   const key = roles.map(r => r.role).join() + '|' + models.map(m => m.model).join();
   if (key === (renderLegend as LegendFn).key) return; (renderLegend as LegendFn).key = key;
   const sw = (c: string, l: string) => `<span><i class="sw" style="--c:${c}"></i>${esc(l)}</span>`;
+  if (DUNES) { $('#legend')!.innerHTML = `
+    <div class="arm-key"><svg width="30" height="44" viewBox="0 0 30 44" aria-hidden="true"><rect x="9" y="12" width="8" height="30" rx="2" fill="#cfc6b6"/><rect x="8" y="28" width="10" height="5" fill="#d8604b"/><rect x="7" y="7" width="12" height="5" rx="2" fill="#d6b425"/><ellipse cx="13" cy="20" rx="7" ry="2" fill="none" stroke="#3987e5" stroke-width="2"/><circle cx="13" cy="5" r="2" fill="#36d07a"/><circle cx="25" cy="30" r="3" fill="#e2b08a"/><path d="M21 42l4-10 4 10z" fill="#d8604b"/></svg>
+      <span class="note">Band and robe = role · tower cap = model · glow ring = effort · lamp = status · canisters = role color.</span></div>
+    <div class="lg-band"><b>Band · robe · role</b><div class="lg-sw">${roles.map(r => sw(r.color, r.role)).join('') || '<span class="note">none yet</span>'}</div></div>
+    <div class="lg-band"><b>Tower cap · model</b><div class="lg-sw">${models.map(m => sw(m.color, m.label)).join('') || '<span class="note">none yet</span>'}</div></div>
+    <div class="lg-band"><b>Glow ring · effort</b><div><div class="lg-ramp">${DS.EFFORTS.map(e => `<span style="--c:${e.color}" title="${e.label}"></span>`).join('')}</div><div class="lg-ramp-l"><span>low</span><span>med</span><span>high</span><span>xhigh</span><span>max</span></div></div></div>
+    <span class="note"><b style="color:var(--color-ink-2)">Farm = project · condenser row = session · tower and farmhand = agent · hover-sled = transport to the depot.</b></span>
+    <span class="note">Spinning fins, green lamp = running · amber lamp = waiting · red strobe = failed · dim, farmhand sitting = done (main; finished subagents' towers sink and their farmhand walks home). Homestead beacon: blue flashing = needs you, amber = waiting, green = running. One canister ≈ 20,000 tokens; the depot pile is the window total. Wardens patrol the dunes and stand guard by a farm that needs you.</span>
+    <span class="note"><b style="color:var(--color-human-ink)">Flashing blue beacon and lamp = needs you</b> (approval, question or your reply).</span>`; return; }
   if (OFFICE) { $('#legend')!.innerHTML = `
     <div class="arm-key"><svg width="30" height="44" viewBox="0 0 30 44" aria-hidden="true"><rect x="2" y="27" width="26" height="5" rx="1" fill="#d8604b"/><rect x="4" y="32" width="3" height="10" fill="#3a404b"/><rect x="23" y="32" width="3" height="10" fill="#3a404b"/><rect x="15" y="13" width="12" height="10" rx="1" fill="#d6b425"/><rect x="20" y="23" width="2" height="4" fill="#8b939b"/><circle cx="8" cy="9" r="4" fill="#e2b08a"/><rect x="4" y="14" width="8" height="13" rx="2" fill="#3987e5"/></svg>
       <span class="note">Clothes = role · desk = model · screen = effort · car and drives = role color.</span></div>

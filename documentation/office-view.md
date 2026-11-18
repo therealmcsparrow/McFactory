@@ -2,9 +2,11 @@
 
 The office view is a second scene for the same data. Projects become office buildings, sessions become desk rows and agents become people at desks. Nothing changes on the server: both scenes read the same `/api/state` snapshot.
 
+![The office view: lit office blocks on a street grid round the bank in the park, with the Robbery and Speeder buttons at the bottom right](images/office.png)
+
 ## Switching views
 
-Use the **Factory** and **Office** buttons, or open the page with `?view=office` (or `?view=factory`). The choice is remembered in your browser, and switching reloads the page.
+Use the **Factory**, **Office** and **Dunes** buttons, or open the page with `?view=office` (or `?view=factory`). The choice is remembered in your browser, and switching reloads the page.
 
 ## What you see
 
@@ -161,14 +163,13 @@ The stories are a cartoon. They stand for nothing in your data, and nothing is f
 
 ## Settings
 
-The **Settings** button beside Usage opens a dialog with fun elements for both views. All settings are saved in this browser only and apply at once, without a reload.
+The **Settings** button beside Usage opens a dialog with the fun elements of this view (the factory view's show there). All settings are saved in this browser only and apply at once, without a reload.
 
-- **Breakdowns, tow truck and repair shop** (factory view). See [The factory view](factory-view.md#settings).
-- **Offices in town, at most** (office view): 12 to 100, 50 by default. See [Offices in town](#offices-in-town).
-- **Patrol cars** (office view): 0 to 4, 2 by default. 0 means none. See [Patrols and speeders](#patrols-and-speeders).
-- **Dog walkers, at most** (office view): 0 to 20, 6 by default. 0 means none. When you lower it, walkers above the new limit head home, and nobody new comes until there are fewer.
-- **Kids in the park, at most** (office view): 0 to 16, 12 by default. 0 means an empty playground: the kids and parents go home.
-- **Armoured car robberies** (office view, on by default). When on, now and then bandits stop an armoured car; police and SWAT arrive and arrest them.
+- **Offices in town, at most** ): 12 to 100, 50 by default. See [Offices in town](#offices-in-town).
+- **Patrol cars** ): 0 to 4, 2 by default. 0 means none. See [Patrols and speeders](#patrols-and-speeders).
+- **Dog walkers, at most** ): 0 to 20, 6 by default. 0 means none. When you lower it, walkers above the new limit head home, and nobody new comes until there are fewer.
+- **Kids in the park, at most** ): 0 to 16, 12 by default. 0 means an empty playground: the kids and parents go home.
+- **Armoured car robberies** (on by default). When on, now and then bandits stop an armoured car; police and SWAT arrive and arrest them.
 - **Shops and shoppers** (office view, on by default). When off, the shops still stand, but the shoppers and the visiting cars and motorcycles are gone and the shop windows are dark. See [Shops](#shops). Two sliders below it set the most there may be at once. Each shows its current value. The arrow keys change a slider by one, and Home and End go to either end. A slider is greyed out while Shops and shoppers is off.
   - **Shoppers on foot, at most**: 0 to 30, 12 by default. Drivers who walk from the car park come on top of this.
   - **Shop vehicles (cars and motorcycles), at most**: 0 to 20 (the number of spots), 20 by default.

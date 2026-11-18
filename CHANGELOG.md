@@ -2,7 +2,11 @@
 
 All notable changes to this project are listed here.
 
-## Unreleased
+## 0.1.10 - 2026-11-18
+
+### Added
+
+-   A third view, **Dunes** (`?view=dunes`): an overview of a desert planet under two suns. Each project is a moisture farm round a desert town, each open session a row of condenser towers, each agent a tower (band = role, cap = model, glow ring = effort, lamp = status) with a farmhand. Tokens become water canisters that hover-sleds haul into the depot hall in the middle of town, onto the pile that is the window total. Warden squads in white armour patrol the dunes and stand guard by any farm that needs you; dune crawlers walk the outer ring. Wardens, farmhands, sleds and townsfolk go round buildings instead of through them; townsfolk also go round counters and poles and step aside to pass each other. Scenery that shows no data: townsfolk (humans and aliens) walking between shops, houses and the plaza; ships landing at and leaving the town's three spaceport bays; ships flying over now and then; two tall name banners in the farm colour by each homestead door; now and then a duel between two blade fighters out on the dunes; and now and then a saucer that beams an alien up out of town. **Duel** and **Abduction** buttons start one right away. Each has its own setting (**Settings** in the dunes view). See [the dunes view](documentation/dunes-view.md).
 
 ### Fixed
 
@@ -10,6 +14,7 @@ All notable changes to this project are listed here.
 
 ### Changed
 
+-   The **Settings** dialog shows only the settings of the view you are in. Before, it listed the factory and office groups in every view.
 -   The project is renamed from Crate Works Live to **McFactory**: page and window title, package names, the desktop app (`productName` and identifier `com.mcsparrow.mcfactory`) and the docs. The files in `~/.claude` are now `mcfactory-limits.json`, `mcfactory-limits.jsonl` and `mcfactory-dismissed.json`; on first start the server moves the old `crate-works-*` files over, so no limits history or dismissed sessions are lost. The desktop app reads `MCFACTORY_PORT` and still accepts the old `CRATE_WORKS_PORT`.
 
 ## 0.1.9 - 2026-11-18
