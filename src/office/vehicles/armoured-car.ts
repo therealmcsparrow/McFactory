@@ -103,15 +103,19 @@ export function makeArmouredCars(OS: OSAtArmouredCars) {
 }
 
 export function makeDispatch(OS: OSAtDispatch) {
-  const { bldgs, CARRY, trucks, MAXTRUCK, addTruck, goOut } = OS;
+  const { bldgs, CARRY, TRAY, trucks, MAXTRUCK, addTruck, goOut } = OS;
   // at most OUTMAX cars are on a run at once (out, loading, on the way back). The bank unloads only so many cars a minute: more cars on the
   // road would only queue, in the lay-bys and past the bank's in lane onto the street. The others stand in their bays until one is home.
   const OUTMAX = 10, onRun = () => trucks.filter(t => t.st === 'out' || t.st === 'load' || t.st === 'back').length;
   // each office gets as many cars as its pile needs, 1 to PERMAX: enough to carry what it makes in one round trip (rate: drives a second,
   // sampled every 5 s; trip: its cars' round trip, 60 s until one is back), with a fifth to spare. More than its two lay-by slots: the
-  // extra cars are sent ahead (q) and wait on the in road for a slot (one per slot)
+  // extra cars are sent ahead (q) and wait on the in road for a slot. The pile's height counts too: one car per layer (TRAY drives), so a
+  // pile that grows gets more and more cars and one that shrinks fewer (no new car goes out while an office has as many as it wants)
   const PERMAX = 10, TRIP0 = 60;
-  const want = (F: Office) => { const d = F.dock; return clamp(Math.ceil((d.rate || 0) * (d.trip || TRIP0) * 1.2 / CARRY), 1, PERMAX); };
+  const want = (F: Office) => { const d = F.dock;
+    return clamp(Math.max(Math.ceil((d.rate || 0) * (d.trip || TRIP0) * 1.2 / CARRY), Math.ceil(d.q.length / TRAY)), 1, PERMAX); };
+  // cars sent ahead per slot: one, two once the office wants more than five
+  const aheadMax = (F: Office) => want(F) > 5 ? 2 : 1;
   const runs = (F: Office) => trucks.filter(t => t.F === F && (t.st === 'out' || t.st === 'load' || t.st === 'back')).length;
   function dispatch(dt: number) { OS.simT += dt; let run = onRun();
     for (const F of bldgs.values()) { const d = F.dock; d.acc = (d.acc || 0) + dt; if (d.acc >= 5) { const r = (d.n || 0) / d.acc; d.rate = d.rate == null ? r : d.rate * .6 + r * .4; d.n = 0; d.acc = 0; } }
@@ -121,8 +125,8 @@ export function makeDispatch(OS: OSAtDispatch) {
       const held = (s: number) => trucks.some(t => t.F === F && t.slot === s && (t.st === 'out' || t.st === 'load' || (t.st === 'back' && !t.ret)));
       // a car in slot 1 that is loading or loaded leaves through slot 0: no new car for slot 0 until it has gone, or it would wait for that one too
       const rearBusy = trucks.some(t => t.F === F && t.slot === 1 && (t.st === 'load' || (t.st === 'back' && !t.ret)));
-      // (sent ahead: only a full load, one per slot, when the office needs more than two cars)
-      const ahead = (s: number) => trucks.some(t => t.F === F && t.slot === s && t.st === 'out' && t.q);
+      // (sent ahead: only a full load, aheadMax per slot, when the office needs more than two cars)
+      const ahead = (s: number) => trucks.filter(t => t.F === F && t.slot === s && t.st === 'out' && t.q).length >= aheadMax(F);
       let slot = !held(0) ? (rearBusy ? -1 : 0) : !held(1) && avail >= CARRY ? 1 : -1, q = false;
       if (slot < 0 && want(F) > 2 && avail >= CARRY) { slot = !ahead(0) ? 0 : !ahead(1) ? 1 : -1; q = true; } if (slot < 0) continue;
       const T = trucks.find(t => t.st === 'idle' && t.k >= 1 && !t.ghost) || (trucks.length < MAXTRUCK && !trucks.some(t => t.k < 1) ? addTruck() : null); if (!T || T.k < 1) continue;

@@ -3,7 +3,8 @@
 // the same port the global permission hook in ~/.claude/settings.json points at.
 // If something already listens on 4545 (a `node server.js` you started yourself), the app opens that
 // server instead of starting a second one. The window first shows the local loading page, then
-// navigates to the server once its port answers.
+// navigates to the server once its port answers. While the app runs, a watchdog checks the port: when it stays
+// quiet (that server was stopped, or our sidecar crashed), the app starts its own sidecar and reloads the page.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::net::{SocketAddr, TcpStream};
@@ -19,6 +20,10 @@ use tauri_plugin_shell::ShellExt;
 
 const DEFAULT_PORT: u16 = 4545;
 const START_TIMEOUT: Duration = Duration::from_secs(60);
+/// How often the watchdog checks the port, and how long it must stay quiet before the app starts its own server
+/// (long enough that restarting a `node server.js` by hand does not race the sidecar for the port).
+const WATCH_EVERY: Duration = Duration::from_secs(2);
+const QUIET_FOR: Duration = Duration::from_secs(10);
 
 /// Port for this run: CRATE_WORKS_PORT if it is a valid port, else 4545.
 /// Only 4545 is reached by the global permission hook; another port is for testing next to a running server.
@@ -105,6 +110,66 @@ fn start_sidecar(app: &AppHandle, exited: Arc<AtomicBool>) -> Result<(), String>
     Ok(())
 }
 
+/// Wait until the port answers; false when the sidecar exited first or START_TIMEOUT passed.
+fn wait_ready(exited: &AtomicBool) -> bool {
+    let t0 = Instant::now();
+    while !port_open() {
+        if exited.load(Ordering::SeqCst) || t0.elapsed() > START_TIMEOUT {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+    true
+}
+
+fn open_page(app: &AppHandle) {
+    let url = Url::parse(&format!("http://127.0.0.1:{}/", port())).expect("valid url");
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.navigate(url);
+    }
+}
+
+/// Runs for the life of the app. When the port stays quiet for QUIET_FOR (the server we opened was stopped, or our
+/// sidecar crashed), start our own sidecar and reload the page once it answers. When another server comes back on
+/// the port first, reload too: a new server start means a new page token.
+fn watchdog(app: &AppHandle) {
+    let mut quiet: Option<Instant> = None;
+    loop {
+        thread::sleep(WATCH_EVERY);
+        if port_open() {
+            if quiet.take().is_some() {
+                println!("port {} answers again: reloading the page", port());
+                open_page(app);
+            }
+            continue;
+        }
+        let since = *quiet.get_or_insert_with(Instant::now);
+        if since.elapsed() < QUIET_FOR {
+            continue;
+        }
+        eprintln!("port {} quiet for {}s: starting the server sidecar", port(), QUIET_FOR.as_secs());
+        if let Some(old) = app.state::<Sidecar>().0.lock().unwrap().take() {
+            let _ = old.kill();
+        }
+        let exited = Arc::new(AtomicBool::new(false));
+        match start_sidecar(app, exited.clone()) {
+            Ok(()) if wait_ready(&exited) => {
+                println!("server sidecar started: reloading the page");
+                quiet = None;
+                open_page(app);
+            }
+            Ok(()) => {
+                eprintln!("the server sidecar did not come up; trying again");
+                quiet = Some(Instant::now());
+            }
+            Err(e) => {
+                eprintln!("{e}; trying again");
+                quiet = Some(Instant::now());
+            }
+        }
+    }
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -128,25 +193,20 @@ fn main() {
 
             thread::spawn(move || {
                 let p = port();
-                let t0 = Instant::now();
-                while !port_open() {
-                    if exited.load(Ordering::SeqCst) {
-                        show_error(&handle, &format!("The factory server stopped before it was ready.\nIs port {p} free?"));
-                        return;
-                    }
-                    if t0.elapsed() > START_TIMEOUT {
-                        show_error(&handle, &format!("The factory server did not answer on port {p} within {}s.", START_TIMEOUT.as_secs()));
-                        return;
-                    }
-                    thread::sleep(Duration::from_millis(200));
+                if !wait_ready(&exited) {
+                    let msg = if exited.load(Ordering::SeqCst) {
+                        format!("The factory server stopped before it was ready.\nIs port {p} free?")
+                    } else {
+                        format!("The factory server did not answer on port {p} within {}s.", START_TIMEOUT.as_secs())
+                    };
+                    show_error(&handle, &msg);
+                    return;
                 }
                 if reuse {
                     println!("port {p} already in use: opening the server that is running there");
                 }
-                let url = Url::parse(&format!("http://127.0.0.1:{p}/")).expect("valid url");
-                if let Some(w) = handle.get_webview_window("main") {
-                    let _ = w.navigate(url);
-                }
+                open_page(&handle);
+                watchdog(&handle);
             });
             Ok(())
         })

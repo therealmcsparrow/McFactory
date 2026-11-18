@@ -112,6 +112,7 @@ body{background:var(--color-page);color:var(--color-ink);font:500 14px/1.35 var(
 .board{background:var(--color-board);border-radius:4px;padding:12px 14px;box-shadow:0 0 0 1px var(--color-edge),0 14px 30px -14px oklch(0% 0 0 / .8);position:relative;backdrop-filter:blur(6px)}
 .board.hz::after{content:"";position:absolute;left:0;right:0;top:0;height:4px;border-radius:4px 4px 0 0;background:repeating-linear-gradient(-45deg,var(--color-signal) 0 8px,oklch(16% 0 0) 8px 16px)}
 h1{margin:4px 0 0;font:800 22px/1 var(--font-ui);letter-spacing:.02em;text-transform:uppercase}
+h1 .ver{font-size:11px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--color-ink-3);vertical-align:middle}
 .tag{display:flex;align-items:center;gap:7px;font:500 11px var(--font-mono);color:var(--color-signal);letter-spacing:.02em;white-space:nowrap;text-transform:uppercase}
 .conn{margin-left:auto;display:inline-flex;align-items:center;gap:5px;color:var(--color-ink-3)}
 .conn i{width:7px;height:7px;border-radius:50%;background:var(--color-ink-3)}

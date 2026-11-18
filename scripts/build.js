@@ -13,5 +13,10 @@ const r = spawnSync(process.execPath, [tsc, '-p', path.join(ROOT, 'tsconfig.json
 const errs = (r.stdout || '').split('\n').filter(l => l.includes('error TS'));
 if (errs.length) console.error(errs.slice(0, 20).join('\n') + (errs.length > 20 ? `\n... ${errs.length - 20} more` : ''));
 for (const f of STATIC) fs.copyFileSync(path.join(SRC, f), path.join(DIST, f));
+// the version next to the title: the desktop app's version, bumped for every release
+let version = '';
+try { version = JSON.parse(fs.readFileSync(path.join(ROOT, 'desktop', 'src-tauri', 'tauri.conf.json'), 'utf8')).version || ''; } catch { }
+const html = path.join(DIST, 'index.html');
+fs.writeFileSync(html, fs.readFileSync(html, 'utf8').replace(/ <small class="ver">v__VERSION__<\/small>/, version ? ` <small class="ver">v${version}</small>` : ''));
 if (r.status !== 0) { console.error('build: tsc failed' + (errs.length ? ` with ${errs.length} type error(s) (see above)` : '')); process.exit(r.status || 1); }
 console.log('build: dist/ is ready');

@@ -8,6 +8,7 @@
 
 - **Start**: the window shows a local "Starting" page, then opens `http://127.0.0.1:4545/` once the port answers. If the server stops or does not answer within 60 seconds, that page shows an error.
 - **Already running**: if port 4545 already answers (your own `node server.js`), the app opens that server and starts no sidecar.
+- **Watchdog**: while the app runs it checks the port every 2 seconds. When the port stays quiet for 10 seconds (the server it opened was stopped, or its sidecar crashed), the app starts its own sidecar and reloads the page. When another server answers first, it reloads the page too.
 - **Stop**: closing the window stops the sidecar. Sessions started from the dashboard see their input close and exit by themselves.
 - The dashboard is a page from `127.0.0.1` inside the window and gets no access to the Tauri API. Only the local loading page has Tauri's default core permissions.
 
