@@ -20,7 +20,7 @@ Another copy of the server (or the desktop app) is running. Use that one, or sta
 
 ## My message to a terminal session says "Held by the session"
 
-That session runs without permission prompts, and Claude Code holds messages from outside for it. Review the message in that session, or set `"crossSessionInbound": "accept"` in its settings. See [Held messages](peer-chat.md#held-messages).
+That session runs without permission prompts, and Claude Code holds messages from outside for it until you approve them in the terminal. Approve it there, type on claude.ai through Remote Control instead, or set `"crossSessionInbound": "accept"` in your user settings (`~/.claude/settings.json`). A project's `.claude/settings.local.json` cannot turn the check off: a repository may only make it stricter. See [crossSessionInbound](peer-chat.md#crosssessioninbound).
 
 ## Sending to a terminal session is read-only
 
@@ -34,4 +34,14 @@ The session has closed, or its pipe did not answer. The input unlocks when the s
 
 ## Permission cards do not show for terminal sessions
 
-Install the hook with `node server.js --install-hook`, and check that the server runs on the same port as the hook URL. Sessions started before the change may need a restart.
+Install the hook with `node server.js --install-hook`, and check that the server runs on the same port as the hook URL.
+
+Claude Code reads its hooks when a session starts. A session that was already running when the hook was installed does not use it: restart it (`/exit`, then `claude --resume <session id>`, and `/rc` again if you used Remote Control).
+
+## A question does not show as a form
+
+- The session started before the question hook was installed: restart it (see above).
+- No dashboard page was open when Claude asked. Then the terminal asks at once.
+- The question went back to the terminal after 5 minutes: your hook still has the old timeout of 300 seconds. Run `node server.js --install-hook` again (it writes 86400 seconds for the question hook) and restart the session.
+- The terminal shows nothing and Claude waits: a question is waiting in the dashboard. Look for the blue **Question for you** alert, or press Esc in the terminal.
+- Something else listens on port 4545, for example an older `node server.js` you started yourself. The desktop app then shows that server. Stop it and reopen the app.

@@ -49,8 +49,8 @@ One-off commands, which change the settings file and exit:
 |----------|--------------|
 | `CLAUDE_BIN` | Full path of the `claude` program used for dashboard sessions. Without it the server looks for `claude` on `PATH`, then in `~/.local/bin`. |
 | `AICO_DASH_ASK=0` | Same as `--no-ask-hook`. |
-| `AICO_DASH_UNWATCH_MS` | How long a held question waits after its dashboard panel closes before it goes back to the terminal (milliseconds). Default 3000. For tests. |
-| `AICO_DASH_HOLD_MS` | How long a hook prompt is held before the terminal decides (milliseconds). Default 280000. For tests. |
+| `AICO_DASH_HOLD_MS` | How long a permission prompt is held before the terminal decides (milliseconds). Default 280000. For tests. |
+| `AICO_DASH_ASK_HOLD_MS` | How long a question is held before it goes back to the terminal (milliseconds). Default 86340000 (just under 24 hours). For tests. |
 | `AICO_DASH_NO_SWEEP=1` | Turns off the background release checks of held hook prompts. Tests only. |
 
 ## Run the tests

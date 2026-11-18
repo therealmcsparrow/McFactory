@@ -4,6 +4,19 @@ All notable changes to this project are listed here.
 
 ## Unreleased
 
+## 0.1.7 - 2026-11-18
+
+### Changed
+
+-   Questions with choices from terminal and desktop sessions are held whenever a dashboard is open, not only while that session's panel is open. A blue **Question for you** alert opens the panel with the form.
+-   A held question now waits until you answer it in the dashboard. Closing the panel no longer sends it back to the terminal, and the 280-second limit is gone for questions. It clears without an answer only on Esc in the terminal or when the process ends.
+-   `--install-hook` writes a timeout of 86400 seconds (24 hours) for the question hook. Run it again and restart your sessions to get it. `AICO_DASH_UNWATCH_MS` is gone; `AICO_DASH_ASK_HOLD_MS` is new.
+
+### Docs
+
+-   `crossSessionInbound`: what each value does, and why it belongs in `~/.claude/settings.json` (a repository's settings can only make it stricter).
+-   Troubleshooting: a question that does not show as a form.
+
 ## 0.1.6 - 2026-11-18
 
 ### Added

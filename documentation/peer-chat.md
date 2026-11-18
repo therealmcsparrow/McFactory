@@ -1,6 +1,6 @@
 # Chat with terminal and desktop sessions
 
-Sessions you started in the Claude CLI or the Claude desktop app get the same chat panel. While they are live (a running process with a messaging pipe) you can message them; once closed you can continue them here. The note under the input reads "Terminal or desktop session. Your messages arrive as from a teammate; approvals stay in the permission cards."
+Sessions you started in the Claude CLI or the Claude desktop app get the same chat panel. While they are live (a running process with a messaging pipe) you can message them; once closed you can continue them with Remote Control. The note under the input reads "Terminal or desktop session. Your messages arrive as from a teammate; approvals stay in the permission cards."
 
 ## What you see
 
@@ -22,20 +22,43 @@ Slash commands do not run from here: text sent to these sessions arrives as a pl
 
 ## Held messages
 
-A session that runs without permission prompts (bypass mode) does not hand messages from outside to Claude. Claude Code holds them for you to review in that session.
+A session that runs without permission prompts (bypass mode) does not hand messages from outside to Claude. Claude Code holds them, and asks you to approve each one in that terminal. The dashboard does not say which permission mode it runs in, so its messages are held in that case.
 
 The panel shows each one as **Held by the session, not delivered**, with what to do:
 
-- review it in the session itself, or
-- set `"crossSessionInbound": "accept"` in that session's settings.
+- approve it in the session itself, or
+- let messages from outside through, with `crossSessionInbound` (below), or
+- use Remote Control (below) and type on claude.ai instead. That is your own input, so nothing is held.
 
 The dashboard never claims a permission mode to get past this check. It is a Claude Code safety control and stays your decision.
 
-Claude Code may ask you to approve a message from outside in the terminal. A message from the dashboard never counts as your consent there. To skip that, use Remote Control (below) and type on claude.ai instead.
+### crossSessionInbound
+
+This Claude Code setting decides what happens to messages from outside a session: from the dashboard and from other Claude sessions.
+
+| Value | What happens |
+|-------|--------------|
+| `"accept"` | Delivered to Claude at once, without asking. |
+| `"hold"` | Held: you approve each one in the session. |
+| `"refuse"` | Not delivered. |
+
+Without the setting, Claude Code holds a message only when the sending side's permission mode does not match the session's, for example a dashboard message to a session in bypass mode.
+
+To deliver dashboard messages without approving them in the terminal, put this in your **user** settings, `~/.claude/settings.json`. It then applies to every session:
+
+```json
+{
+  "crossSessionInbound": "accept"
+}
+```
+
+A repository's settings (`.claude/settings.json` or `.claude/settings.local.json` in the project) can only make this stricter, with `"hold"` or `"refuse"`. An `"accept"` there does not turn the check off, and a repository `"hold"` wins over your own `"accept"`. Managed settings from your organization win over both.
+
+Any session on this computer that can reach the session's pipe and key can then message it without asking. That is why the dashboard never sets this for you.
 
 ## Questions with choices
 
-When Claude asks a question with choices (AskUserQuestion) while this panel is open, the question shows here as a form. The terminal waits while it is shown here. Close the panel and after 3 seconds the terminal asks instead. See [Answer prompts from the dashboard](permission-hook.md#askuserquestion-choices-forms).
+When Claude asks a question with choices (AskUserQuestion) while a dashboard is open, the blue **Question for you** alert shows. Click it to open this panel with the question as a form. The question waits here until you answer it, even when you close the panel; the terminal and claude.ai show nothing meanwhile. Press Esc in the terminal to drop it there instead. See [Answer prompts from the dashboard](permission-hook.md#askuserquestion-choices-forms).
 
 ## Remote Control
 
