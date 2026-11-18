@@ -40,7 +40,7 @@ export interface SharedOfficeState {
   ctx: SceneCtx; kit: OfficeKit;
   stackN: number; stackShown: number; moreLab: CSS2DObject | null;
   focusF: Office | null; markedTask: string | null; pov: Pov | null;
-  net: RoadNet; pForced: number;
+  net: RoadNet; pForced: number; lastFrame: number; // performance.now() of the last frame (people.ts leave: no frames = hidden)
   simT: number; tMin: number; tMinAt: (string | number)[][] | null; // tMin/tMinAt: the closest two vehicles came, and where (probe traffic())
 }
 

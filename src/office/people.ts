@@ -103,8 +103,11 @@ export function makePeople(OS: OSAtPeople) {
     const s = P.seat, was = P.state === 'seat' && s; people.delete(P.id); P.leaving = true;
     if (reduced) { if (s) s.who = null; P.seat = null; if (P.car) dropCar(P.car); dropPerson(P); return; }
     leavers.add(P); if (P.state === 'car') { if (s) s.who = null; P.seat = null; P.gone = true; if (P.car && P.car.st === 'wait') { dropCar(P.car); dropPerson(P); } return; }
-    if (P.hold && P.gin && !P.tok) { if (P.car) carLeave(P.car); dropPerson(P); return; } // still waiting in the car (or off the street) for the door: just drives off again
+    if (P.hold && !P.tok) { if (P.car) carLeave(P.car); dropPerson(P); return; } // never stepped out (still in the car, off the street or in the manager's office): just goes again, unseen
     const inside = P.z < HZ; P.wait = 0;
+    // no frames lately (the window is hidden or minimised): whoever is at a desk is simply gone when you look again, instead of a crowd
+    // of everyone who finished meanwhile queueing at the out gate
+    if (was && (document.hidden || performance.now() - OS.lastFrame > 1500)) { if (P.car) carLeave(P.car); dropPerson(P); return; }
     if (was) { P.path = [...outPath(s), ...outFront(P, true)]; P.lq = true; P.og = true; return; } // stays at the desk (seat kept) until there is room on the way out
     if (s) s.who = null; P.seat = null; P.state = 'walk';
     if (!inside || P.tok === 'out') P.path = outFront(P, inside); // already on the way out: straight on

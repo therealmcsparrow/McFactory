@@ -41,6 +41,7 @@ export function makeFrame(OS: OSAtFrame) {
     crowd.length = 0; for (const P of people.values()) if (P.state !== 'seat' && P.state !== 'car') crowd.push(P); for (const P of leavers) if (P.state !== 'seat' && P.state !== 'car') crowd.push(P);
     for (const P of people.values()) stepPerson(P, dt, t);
     for (const P of [...leavers]) stepPerson(P, dt, t);
+    OS.lastFrame = performance.now();
     // packets on the data lines
     let n = 0; for (let i = pulses.length - 1; i >= 0; i--) { const p = pulses[i]; p.s += dt * 5; const len = p.cum[p.cum.length - 1];
       if (p.s >= len || !bldgs.has(p.F.id)) { pulses.splice(i, 1); if (bldgs.get(p.F.id) === p.F) { if (!p.deco) dockPush(p.F, p.c); p.F.srv = 1; } continue; }
