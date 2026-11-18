@@ -1,6 +1,6 @@
-# Crate Works Live documentation
+# McFactory documentation
 
-Crate Works Live shows your Claude Code activity as a live factory, and lets you chat with your sessions from that same page. These pages explain each part.
+McFactory shows your Claude Code activity as a live factory, and lets you chat with your sessions from that same page. These pages explain each part.
 
 | Page | What it covers |
 |------|----------------|

@@ -91,11 +91,16 @@ if (argv.includes('--install-hook') || argv.includes('--uninstall-hook')) hookCl
 // can register itself as one. That mode saves ONLY those numbers (never cwd, session id, paths or model) and prints a line.
 const CLAUDE_DIR = path.dirname(ROOT);
 const SETTINGS_FILE = path.resolve(arg('settings', path.join(CLAUDE_DIR, 'settings.json')));
-const LIMITS_FILE = path.join(CLAUDE_DIR, 'crate-works-limits.json');
-const LIMITS_HIST = path.join(CLAUDE_DIR, 'crate-works-limits.jsonl');
+// Files were named crate-works-* before the rename to McFactory; move them over once so no data is lost.
+for (const f of ['limits.json', 'limits.jsonl', 'dismissed.json']) {
+  const from = path.join(CLAUDE_DIR, 'crate-works-' + f), to = path.join(CLAUDE_DIR, 'mcfactory-' + f);
+  try { if (fs.existsSync(from) && !fs.existsSync(to)) fs.renameSync(from, to); } catch { }
+}
+const LIMITS_FILE = path.join(CLAUDE_DIR, 'mcfactory-limits.json');
+const LIMITS_HIST = path.join(CLAUDE_DIR, 'mcfactory-limits.jsonl');
 const LIMITS_HIST_MAX = 200e3;
 // Dismiss: finished sessions the user hid from the list and the office. sessionId -> when; a session with newer activity shows again.
-const DISMISS_FILE = path.join(CLAUDE_DIR, 'crate-works-dismissed.json'), DISMISS_MAX = 2000, DISMISS_DAYS = 60;
+const DISMISS_FILE = path.join(CLAUDE_DIR, 'mcfactory-dismissed.json'), DISMISS_MAX = 2000, DISMISS_DAYS = 60;
 const dismissed = new Map();
 try { const o = JSON.parse(fs.readFileSync(DISMISS_FILE, 'utf8')); if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) if (/^[\w-]{1,64}$/.test(k) && Number.isFinite(v)) dismissed.set(k, v); } catch { }
 function saveDismissed() {

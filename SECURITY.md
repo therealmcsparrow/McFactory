@@ -6,11 +6,11 @@ Only the latest release, and the latest commit on `main`, receive security fixes
 
 ## Status of this project
 
-Crate Works Live is free software under the MIT licence. It is non-commercial open source software under the EU Cyber Resilience Act (CRA). It is not sold. If that ever changes, this page changes with it.
+McFactory is free software under the MIT licence. It is non-commercial open source software under the EU Cyber Resilience Act (CRA). It is not sold. If that ever changes, this page changes with it.
 
 ## Scope
 
-Crate Works Live is a local tool: the server listens on `127.0.0.1` only. [Security and privacy](documentation/security-and-privacy.md) describes what it accepts, what it shows and what it writes.
+McFactory is a local tool: the server listens on `127.0.0.1` only. [Security and privacy](documentation/security-and-privacy.md) describes what it accepts, what it shows and what it writes.
 
 In scope:
 

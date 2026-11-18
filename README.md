@@ -1,4 +1,4 @@
-# Crate Works Live
+# McFactory
 
 [![Validate](https://github.com/therealmcsparrow/McFactory/actions/workflows/validate.yml/badge.svg)](https://github.com/therealmcsparrow/McFactory/actions/workflows/validate.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)

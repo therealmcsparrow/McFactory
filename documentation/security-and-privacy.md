@@ -1,6 +1,6 @@
 # Security and privacy
 
-Crate Works Live is a local tool. The server listens on `127.0.0.1` only and sends nothing off your computer. The page makes two kinds of outside request: it loads the three.js library (version 0.160.0) from the jsDelivr CDN, and its fonts from Google Fonts. Those services see your IP address and browser, but no session data.
+McFactory is a local tool. The server listens on `127.0.0.1` only and sends nothing off your computer. The page makes two kinds of outside request: it loads the three.js library (version 0.160.0) from the jsDelivr CDN, and its fonts from Google Fonts. Those services see your IP address and browser, but no session data.
 
 ## What the server accepts
 
@@ -41,7 +41,7 @@ The **peer token** of a terminal or desktop session (from its `.key` file) is re
 | File | When | What |
 |------|------|------|
 | `~/.claude/settings.json` | Only with `--install-hook`, and when you have no status line | The two hook entries (permission and AskUserQuestion), or the status line entry. Other keys are kept. |
-| `~/.claude/crate-works-limits.json` and `.jsonl` | When the status line runs | Limit percentages and reset times only. |
+| `~/.claude/mcfactory-limits.json` and `.jsonl` | When the status line runs | Limit percentages and reset times only. |
 
 Chat logs of dashboard sessions are kept in memory only. Claude Code itself still writes its normal transcripts.
 

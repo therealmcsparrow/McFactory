@@ -73,11 +73,11 @@ for (const P of PROJECTS) {
 }
 
 // plan limits, as the status line would have written them
-fs.writeFileSync(path.join(CL, 'crate-works-limits.json'), JSON.stringify({ at: now, windows: { five_hour: { pct: 38, resetsAt: now + 2.4 * H }, seven_day: { pct: 61, resetsAt: now + 2.6 * D } } }));
+fs.writeFileSync(path.join(CL, 'mcfactory-limits.json'), JSON.stringify({ at: now, windows: { five_hour: { pct: 38, resetsAt: now + 2.4 * H }, seven_day: { pct: 61, resetsAt: now + 2.6 * D } } }));
 let hist = '', w = 0;
 for (let t = now - 14 * D; t < now; t += H) { const day = Math.floor((t - (now - 14 * D)) / D);
   if (day % 7 === 4 && w > 0 && (t - (now - 14 * D)) % D < H) w = 0; w = Math.min(100, w + rnd() * .8);
   const f = Math.round(((t / H) % 10) * (4 + 3 * Math.sin(t / D)) + rnd() * 3); hist += JSON.stringify({ t, w: { five_hour: Math.min(100, f), seven_day: Math.round(w * 10) / 10 } }) + '\n'; }
-fs.writeFileSync(path.join(CL, 'crate-works-limits.jsonl'), hist);
+fs.writeFileSync(path.join(CL, 'mcfactory-limits.jsonl'), hist);
 fs.writeFileSync(path.join(CL, 'settings.json'), '{}\n');
 console.log('demo data in ' + CL);

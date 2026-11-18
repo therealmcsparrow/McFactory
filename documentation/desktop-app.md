@@ -31,4 +31,4 @@ Releases on GitHub include the installer, built by the Release workflow. See [MA
 
 ## Testing next to a running server
 
-`CRATE_WORKS_PORT=4598` makes the app use another port. The global hook only reaches 4545.
+`MCFACTORY_PORT=4598` makes the app use another port. The global hook only reaches 4545.

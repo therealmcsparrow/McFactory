@@ -4,6 +4,10 @@ All notable changes to this project are listed here.
 
 ## Unreleased
 
+### Changed
+
+-   The project is renamed from Crate Works Live to **McFactory**: page and window title, package names, the desktop app (`productName` and identifier `com.mcsparrow.mcfactory`) and the docs. The files in `~/.claude` are now `mcfactory-limits.json`, `mcfactory-limits.jsonl` and `mcfactory-dismissed.json`; on first start the server moves the old `crate-works-*` files over, so no limits history or dismissed sessions are lost. The desktop app reads `MCFACTORY_PORT` and still accepts the old `CRATE_WORKS_PORT`.
+
 ## 0.1.9 - 2026-11-18
 
 ### Changed

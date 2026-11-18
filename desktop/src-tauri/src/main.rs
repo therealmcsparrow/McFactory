@@ -1,4 +1,4 @@
-// Crate Works Live desktop app, step 1: the dashboard page in a Tauri window.
+// McFactory desktop app, step 1: the dashboard page in a Tauri window.
 // server.js runs as a sidecar (compiled to one executable by scripts/build-sidecar.mjs) on 127.0.0.1:4545,
 // the same port the global permission hook in ~/.claude/settings.json points at.
 // If something already listens on 4545 (a `node server.js` you started yourself), the app opens that
@@ -25,10 +25,11 @@ const START_TIMEOUT: Duration = Duration::from_secs(60);
 const WATCH_EVERY: Duration = Duration::from_secs(2);
 const QUIET_FOR: Duration = Duration::from_secs(10);
 
-/// Port for this run: CRATE_WORKS_PORT if it is a valid port, else 4545.
+/// Port for this run: MCFACTORY_PORT (or the old CRATE_WORKS_PORT) if it is a valid port, else 4545.
 /// Only 4545 is reached by the global permission hook; another port is for testing next to a running server.
 fn port() -> u16 {
-    std::env::var("CRATE_WORKS_PORT")
+    std::env::var("MCFACTORY_PORT")
+        .or_else(|_| std::env::var("CRATE_WORKS_PORT"))
         .ok()
         .and_then(|v| v.parse().ok())
         .filter(|p| *p > 0)
