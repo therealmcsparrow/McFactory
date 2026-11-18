@@ -4,6 +4,17 @@ All notable changes to this project are listed here.
 
 ## Unreleased
 
+## 0.1.8 - 2026-11-18
+
+### Added
+
+-   The version number next to the **Crate Works** title.
+-   Desktop app: a watchdog. When port 4545 stays quiet for 10 seconds while the app runs (the `node server.js` it opened was stopped, or its own server crashed), the app starts its own server and reloads the page. Before, the dashboard stayed without a server, and the office docks got no drives.
+
+### Changed
+
+-   Office view: the number of armoured cars per office follows the height of its drive pile, one per layer (12 drives), up to 10. A growing pile gets more and more cars and a shrinking one fewer. An office that needs more than five cars gets two cars waiting ahead for each lay-by spot instead of one.
+
 ## 0.1.7 - 2026-11-18
 
 ### Changed

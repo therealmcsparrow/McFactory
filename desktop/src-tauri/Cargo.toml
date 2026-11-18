@@ -1,6 +1,6 @@
 [package]
 name = "crate-works-live"
-version = "0.1.7"
+version = "0.1.8"
 description = "Crate Works Live desktop app: the factory dashboard in a window, with server.js as a sidecar"
 edition = "2021"
 publish = false
