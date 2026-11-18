@@ -60,7 +60,7 @@ export function runStop(OS: StopOS, o: StopOpts): StopRun {
   const door = () => w(C, sd * (chw + .45), 0, cb.min.z + (cb.max.z - cb.min.z) * .52), win = () => w(D, sd * (dhw + .02), winY, seatZ);
   // where the officer stands: behind the door pillar as officers do, or just ahead of the window when that would put them
   // between the camera and the driver's head (picked once, by the screen distance between officer and head)
-  const head0 = w(D, sd * dhw, winY + .1, seatZ).project(OS.ctx.camera), sx = (dz: number) => Math.abs(w(D, sd * (dhw + .55), 1, seatZ + dz).project(OS.ctx.camera).x - head0.x);
+  const head0 = w(D, sd * dhw, winY + .1, seatZ).project(OS.ctx.view), sx = (dz: number) => Math.abs(w(D, sd * (dhw + .55), 1, seatZ + dz).project(OS.ctx.view).x - head0.x);
   const standZ = sx(-.62) > .6 * sx(.42) ? -.62 : .42;
   const stand = () => w(D, sd * (dhw + .55), 0, seatZ + standZ);
   const route = (): P2[] => [xz(w(C, sd * (chw + .7), 0, cb.max.z + .25)), xz(w(D, sd * (dhw + .7), 0, db.min.z - .2)), xz(stand())];

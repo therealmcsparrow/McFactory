@@ -49,7 +49,7 @@ interface Bub { t: BubbleTarget; o: CSS2DObject; el: HTMLDivElement; tx: HTMLDiv
 const GAP = 4, EDGE = 8;
 
 export function makeBubbles(OS: BubbleOS): Bubbles {
-  const { scene, camera, CSS2DObject } = OS.ctx;
+  const { scene, camera, view, CSS2DObject } = OS.ctx;
   if (!styled) { const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st); styled = true; }
   const L: Bub[] = [], v = new THREE.Vector3(), nd = new THREE.Vector3();
   const anchor = (b: Bub, out: THREE.Vector3) => typeof b.t === 'function' ? out.copy(b.t()) : b.t.getWorldPosition(out).setY(out.y + b.y);
@@ -95,7 +95,7 @@ export function makeBubbles(OS: BubbleOS): Bubbles {
     for (const b of [...L]) {
       if (b.out >= 0) { if ((b.out -= dt) <= 0) kill(b); continue; }
       if ((b.life -= dt) <= 0) { leave(b); continue; }
-      anchor(b, v); b.o.position.copy(v); nd.copy(v).project(camera);
+      anchor(b, v); b.o.position.copy(v); nd.copy(v).project(view);
       b.o.visible = !far && Math.abs(nd.x) < 1.05 && Math.abs(nd.y) < 1.1 && nd.z > -1 && nd.z < 1;
       b.sx = (nd.x + 1) / 2 * innerWidth; b.sy = (1 - nd.y) / 2 * innerHeight;
     }

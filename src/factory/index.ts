@@ -75,7 +75,7 @@ export function buildScene(ctx: SceneCtx) {
       upd(); setInterval(upd, 250); } }
   function robotAt(cx: number, cy: number) { // the robot under a screen point (instanced, so by projected distance), or null
     const v = new THREE.Vector3(), W = innerWidth, H = innerHeight; let best: Robot | null = null, bd = Math.max(22, 32 * ctx.camera.zoom) ** 2; // generous: the robots are small and keep moving
-    for (const r of robots) { if (r.dying || r.born < 1) continue; v.set(r.x, .2, r.z).project(ctx.camera);
+    for (const r of robots) { if (r.dying || r.born < 1) continue; v.set(r.x, .2, r.z).project(ctx.view);
       const d = ((v.x + 1) / 2 * W - cx) ** 2 + ((1 - v.y) / 2 * H - cy) ** 2; if (d < bd) { bd = d; best = r; } }
     return best && { id: best.id, canDrive: best.st === 'go' && !best.broken && !best.towed && !best.shoulder, moving: best.v > .3 };
   }

@@ -8,6 +8,7 @@ import type { FocusFit, Hall, Line, Rect } from './types.js';
 
 export function makeFocus(FS: FSAtFocus) {
   const { W, camera, HX, XC, facs, whLab, extraLabs, BX0, BX1, BY, arms, dyingArms, ARMDZ, lineIdx, WHX, WHZ, BAYZ, XP, R } = FS;
+  const { view } = FS.ctx; // the render camera: screen positions of labels
   const RV = new THREE.Vector3(), UV = new THREE.Vector3(), FV = new THREE.Vector3(), FP = new THREE.Vector3(), LP = new THREE.Vector3();
   // free screen area for an open hall: between the left column and the detail card (or right column), below the Overview button
   function freeArea() {
@@ -40,7 +41,7 @@ export function makeFocus(FS: FSAtFocus) {
   function layoutLabels() {
     if (!FS.focusF) { if (layOn) { layOn = false; for (const [o] of labItems()) { setOff(o.element, 0, 0, false); o.element.classList.remove('lnear'); if (o.element.classList.contains('cb')) o.element.style.maxWidth = ''; } lmore.hidden = true; } return; }
     layOn = true; const w = innerWidth, h = innerHeight, A = freeArea(), placed: Rect[] = [], obs: Rect[] = [], F = facs.get(FS.focusF); let hid = 0;
-    const scr = (v: THREE.Vector3, out: { x: number; y: number }) => { v.project(camera); out.x = (v.x + 1) / 2 * w; out.y = (1 - v.y) / 2 * h; return out; }, sp = {} as { x: number; y: number };
+    const scr = (v: THREE.Vector3, out: { x: number; y: number }) => { v.project(view); out.x = (v.x + 1) / 2 * w; out.y = (1 - v.y) / 2 * h; return out; }, sp = {} as { x: number; y: number };
     const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number) => { const r: Rect = { l: 1e9, t: 1e9, r: -1e9, b: -1e9 }; // screen rect of a hall-local box
       for (const x of [x0, x1]) for (const y of [y0, y1]) for (const z of [z0, z1]) { scr(W(F!, x, y, z, LP), sp); r.l = Math.min(r.l, sp.x); r.r = Math.max(r.r, sp.x); r.t = Math.min(r.t, sp.y); r.b = Math.max(r.b, sp.y); }
       return r; };

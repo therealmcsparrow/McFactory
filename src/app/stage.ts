@@ -64,10 +64,27 @@ export function startApp(buildScene: (ctx: SceneCtx) => SceneApi, o: AppOptions)
   controls.minPolarAngle = o.minPolar ?? 0.4; controls.maxPolarAngle = o.maxPolar ?? 1.2;
   controls.minZoom = o.minZoom ?? 0.5; controls.maxZoom = o.maxZoom ?? 5;
   controls.screenSpacePanning = true;
+  // ── the render camera: real perspective, driven by the orthographic camera above. Everything else (orbit controls, fly-tos,
+  // focus fits, the desk view, the window peek) keeps working in ortho terms; each frame this camera sits on the same view axis,
+  // backed off until the target plane shows exactly what the ortho camera shows there, with the clip planes at the same places.
+  // A narrow lens keeps the overview close to isometric, while far things shrink a little, so depth reads naturally.
+  const view = new THREE.PerspectiveCamera(o.fov ?? 24, aspect, 1, 1000);
+  const vFwd = new THREE.Vector3(), vTo = new THREE.Vector3(), tanHalf = Math.tan(THREE.MathUtils.degToRad(view.fov) / 2);
+  let viewOff = 0; // how far the render camera sits behind the ortho one (fog is shifted by this too)
+  function syncView() {
+    camera.updateMatrixWorld(); const fwd = camera.getWorldDirection(vFwd);
+    const L = vTo.copy(controls.target).sub(camera.position).dot(fwd), dist = (camera.top - camera.bottom) / camera.zoom / 2 / tanHalf;
+    viewOff = dist - L;
+    view.position.copy(camera.position).addScaledVector(fwd, -viewOff); view.quaternion.copy(camera.quaternion);
+    view.aspect = (camera.right - camera.left) / (camera.top - camera.bottom);
+    view.near = Math.max(camera.near + viewOff, dist * .25, .02); view.far = Math.max(camera.far + viewOff, view.near + 1);
+    const cv = camera.view; if (cv && cv.enabled) view.setViewOffset(cv.fullWidth, cv.fullHeight, cv.offsetX, cv.offsetY, cv.width, cv.height); else view.clearViewOffset();
+    view.updateProjectionMatrix(); view.updateMatrixWorld();
+  }
   const sz = new THREE.Vector2(); renderer.getDrawingBufferSize(sz);
   const rt = new THREE.WebGLRenderTarget(sz.x, sz.y, { type: THREE.HalfFloatType, samples: 2 }); // 4x MSAA on a half-float full-res target was the main GPU cost on iGPUs
   const composer = new EffectComposer(renderer, rt);
-  composer.addPass(new RenderPass(scene, camera));
+  composer.addPass(new RenderPass(scene, view));
   const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), o.bloom?.strength ?? 0.5, o.bloom?.radius ?? 0.4, o.bloom?.threshold ?? 1);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
@@ -78,7 +95,7 @@ export function startApp(buildScene: (ctx: SceneCtx) => SceneApi, o: AppOptions)
     const w = innerWidth, h = innerHeight, a = w / h;
     const f = o.frustum * (a < 1 ? 1.6 : 1); camera.left = -f * a / 2; camera.right = f * a / 2; camera.top = f / 2; camera.bottom = -f / 2;
     camera.updateProjectionMatrix(); renderer.setPixelRatio(PR * resScale); renderer.setSize(w, h); composer.setPixelRatio(PR * resScale); composer.setSize(w, h); labels.setSize(w, h);
-    bloom.setSize(w, h); applyShift(); refreshHome(false);
+    bloom.setSize(w, h); applyShift(); refreshHome(false); syncView();
   }
   // shift the projection so the camera target lands in the free gap between the left and right columns
   function applyShift() {
@@ -113,7 +130,7 @@ export function startApp(buildScene: (ctx: SceneCtx) => SceneApi, o: AppOptions)
   $('#skip')?.addEventListener('click', finishIntro);
 
   const pickables: THREE.Object3D[] = [];
-  const ctx: SceneCtx = { THREE, scene, camera, renderer, controls, CSS2DObject, reduced, composer, bloom,
+  const ctx: SceneCtx = { THREE, scene, camera, view, renderer, controls, CSS2DObject, reduced, composer, bloom,
     addPickable(m, pick) { m.userData.pick = pick; pickables.push(m); },
     removePickable(m) { const i = pickables.indexOf(m); if (i >= 0) pickables.splice(i, 1); },
     focus: (k, id) => api.focus(k, id), flyTo: (t, f) => flyTo(t, f), flying: () => !!fly, hud };
@@ -174,7 +191,7 @@ export function startApp(buildScene: (ctx: SceneCtx) => SceneApi, o: AppOptions)
   addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
   addEventListener('wheel', closeMenu, { passive: true }); addEventListener('blur', closeMenu);
   function pickAt(): PickT | null {
-    ray.setFromCamera(ptr, camera); ray.ray.origin.addScaledVector(ray.ray.direction, camera.near); // start at the (negative) near plane so foreground stays pickable
+    ray.setFromCamera(ptr, view); ray.ray.origin.addScaledVector(ray.ray.direction, view.near); // start at the near plane: what is clipped is not pickable
     const hits = ray.intersectObjects(pickables, false);
     for (const h of hits) { let ob: THREE.Object3D | null = h.object; while (ob && !ob.userData.pick) ob = ob.parent; if (ob && ob.visible !== false) return ob.userData.pick; }
     return null;
@@ -219,12 +236,15 @@ export function startApp(buildScene: (ctx: SceneCtx) => SceneApi, o: AppOptions)
     // no idle return: the camera stays where you left it; only Esc / the back button goes back to the overview
     controls.update(dt);
     S.frame(dt, t);
+    syncView();
     if (dirty) { dirty = false; doHover(); }
     if (focused && focused.kind === 'agent' && S.anchorOf) {
       const v = S.anchorOf(focused.id); const a = agentIndex.get(focused.id);
       if (v && a) { fl.visible = true; fl.position.copy(v); const s = `${a.role} · ${fmt.tokens(a.tokens)}`; if (flEl.textContent !== s) flEl.textContent = s; } else fl.visible = false;
     }
     hud.frame(dt);
-    composer.render(dt); labels.render(scene, camera); S.layoutLabels();
+    const fog = scene.fog as THREE.Fog | null; if (fog && fog.isFog) { fog.near += viewOff; fog.far += viewOff; } // fog is by view depth: shift it with the camera
+    composer.render(dt); if (fog && fog.isFog) { fog.near -= viewOff; fog.far -= viewOff; }
+    labels.render(scene, view); S.layoutLabels();
   });
 }

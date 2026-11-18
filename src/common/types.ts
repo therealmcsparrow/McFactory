@@ -70,7 +70,12 @@ export interface DashSim {
 export type PickKind = 'project' | 'task' | 'agent' | (string & {});
 export interface Pick { kind: PickKind; id: string }
 export interface SceneCtx {
-  THREE: typeof THREE; scene: THREE.Scene; camera: THREE.OrthographicCamera; renderer: THREE.WebGLRenderer; controls: OrbitControls;
+  THREE: typeof THREE; scene: THREE.Scene;
+  /** The logical camera: orthographic, moved by the controls, focus and fly-tos. Zoom, fits and clip planes are in its terms. */
+  camera: THREE.OrthographicCamera;
+  /** The camera that renders (perspective, synced from `camera` each frame): use it to project to the screen or raycast. */
+  view: THREE.PerspectiveCamera;
+  renderer: THREE.WebGLRenderer; controls: OrbitControls;
   CSS2DObject: typeof CSS2DObject; reduced: boolean; composer: EffectComposer; bloom: UnrealBloomPass;
   addPickable(m: THREE.Object3D, pick: Pick): void; removePickable(m: THREE.Object3D): void;
   focus(kind: PickKind, id: string): void;
@@ -89,7 +94,7 @@ export interface AppApi {
 }
 /** The stage config (APP in app/main.ts): camera frustum and limits, overview and intro camera, post effects. */
 export interface AppOptions {
-  frustum: number; exposure?: number; envIntensity?: number; orbitSpeed?: number;
+  frustum: number; /** vertical field of view of the render camera, degrees (default 24) */ fov?: number; exposure?: number; envIntensity?: number; orbitSpeed?: number;
   minPolar?: number; maxPolar?: number; minZoom?: number; maxZoom?: number;
   home: { target: THREE.Vector3; pos: THREE.Vector3; zoom?: number };
   intro?: { pos: THREE.Vector3; target?: THREE.Vector3; zoom?: number; dur?: number };
