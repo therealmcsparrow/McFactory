@@ -52,7 +52,7 @@ type ProbeVeh = Omit<Vehicle, 'by'> & { st?: string; bay?: ArmouredCar['bay']; r
 
 export function buildOffice(ctx: SceneCtx, kit: OfficeKit): SceneApi {
   const OS = { ctx, kit, stackN: 0, stackShown: 0, moreLab: null, focusF: null, markedTask: null, pov: null,
-    net: { key: null, N: new Map(), R: [], kc: [] }, pForced: 0, simT: 0, tMin: Infinity, tMinAt: null } as unknown as OfficeState;
+    net: { key: null, N: new Map(), R: [], kc: [] }, pForced: 0, lastFrame: 0, simT: 0, tMin: Infinity, tMinAt: null } as unknown as OfficeState;
   Object.assign(OS, makeLayout(OS)); // lights, layout constants, geometry helpers
   Object.assign(OS, makeSeats(OS)); // desk seats and the walking paths to them
   Object.assign(OS, makeProps(OS)); // shared geometry (people, vehicle models), materials, signs and labels
