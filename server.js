@@ -7,7 +7,8 @@
 //   /api/stream?hours= SSE, pushes a snapshot when it changes (checked every ~1s)
 //   /api/chat/*        chat with sessions THIS server started (see "owned chat sessions")
 //   /hook/permission, /hook/pretool, /api/ext/*   answer terminal/desktop prompts through global http hooks (see "external prompts")
-//   /api/peer/*        chat with terminal/desktop sessions over their local messaging pipe (see "peer chat")
+//   /api/peer/*        chat with terminal/desktop sessions over their local messaging pipe (see "peer chat");
+//                      POST close (end that process), rc (closed session: reopen it in a new terminal with --remote-control), dismiss (hide a finished one)
 //   /api/agent/*       read-only screen of one subagent (office view: its own text + tool names; see "subagent screen")
 //   /api/refresh       POST, chat token: rescan sessions and transcripts now and re-push every stream
 //   --install-hook [--no-ask] / --uninstall-hook [--settings <file>]   merge/remove only our entries in ~/.claude/settings.json
@@ -91,6 +92,16 @@ const SETTINGS_FILE = path.resolve(arg('settings', path.join(CLAUDE_DIR, 'settin
 const LIMITS_FILE = path.join(CLAUDE_DIR, 'crate-works-limits.json');
 const LIMITS_HIST = path.join(CLAUDE_DIR, 'crate-works-limits.jsonl');
 const LIMITS_HIST_MAX = 200e3;
+// Dismiss: finished sessions the user hid from the list and the office. sessionId -> when; a session with newer activity shows again.
+const DISMISS_FILE = path.join(CLAUDE_DIR, 'crate-works-dismissed.json'), DISMISS_MAX = 2000, DISMISS_DAYS = 60;
+const dismissed = new Map();
+try { const o = JSON.parse(fs.readFileSync(DISMISS_FILE, 'utf8')); if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) if (/^[\w-]{1,64}$/.test(k) && Number.isFinite(v)) dismissed.set(k, v); } catch { }
+function saveDismissed() {
+  const cut = Date.now() - DISMISS_DAYS * 864e5;
+  for (const [k, v] of dismissed) if (v < cut) dismissed.delete(k);
+  while (dismissed.size > DISMISS_MAX) dismissed.delete(dismissed.keys().next().value);
+  try { const tmp = DISMISS_FILE + '.aico-tmp'; fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(dismissed))); fs.renameSync(tmp, DISMISS_FILE); } catch { }
+}
 const SL_OFF = argv.includes('--no-statusline');
 const WIN_RE = /^[a-z0-9_]{1,40}$/;
 const isSea = (() => { try { return require('node:sea').isSea(); } catch { return false; } })();
@@ -463,21 +474,25 @@ function pump() {
 const SESS_DIR = path.join(path.dirname(ROOT), 'sessions');
 let live = null, liveKey = '';           // live: Map sessionId -> {status, waitingFor, since} | null (folder unreadable)
 let procs = new Set();                    // sessionIds a live Claude Code process holds (any status): the session is open
+let rcs = new Map();                      // sessionId -> claude.ai Remote Control url, when that process has /rc on (bridgeSessionId)
+const BRIDGE_RE = /^session_[A-Za-z0-9]{8,64}$/;
+const rcUrl = b => (typeof b === 'string' && BRIDGE_RE.test(b) ? 'https://claude.ai/code/' + b : null);
 const OPEN_MS = 5 * 60e3;                 // fallback: transcript activity this recent keeps a session open
 function alive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }
 function readLive() {
-  let names; try { names = fs.readdirSync(SESS_DIR).filter(n => /^\d+\.json$/.test(n)); } catch { if (live !== null) { live = null; procs = new Set(); liveKey = ''; version++; } return; }
-  const m = new Map(), ps = new Set();
+  let names; try { names = fs.readdirSync(SESS_DIR).filter(n => /^\d+\.json$/.test(n)); } catch { if (live !== null) { live = null; procs = new Set(); rcs = new Map(); liveKey = ''; version++; } return; }
+  const m = new Map(), ps = new Set(), rc = new Map();
   for (const n of names) {
     let o; try { o = JSON.parse(fs.readFileSync(path.join(SESS_DIR, n), 'utf8')); } catch { continue; }
     if (!o || !o.sessionId || (o.pid && !alive(o.pid))) continue;
     ps.add(String(o.sessionId)); peerSeen(String(o.sessionId), o.pid, String(o.status || ''));
+    const u = rcUrl(o.bridgeSessionId); if (u) rc.set(String(o.sessionId), u);
     if (!o.status) continue;
     const at = +o.statusUpdatedAt || +o.updatedAt || 0, prev = m.get(o.sessionId);
     if (!prev || at > prev.since) m.set(o.sessionId, { status: String(o.status), waitingFor: o.waitingFor ? String(o.waitingFor) : '', since: at });
   }
-  const key = JSON.stringify([[...m], [...ps]]);
-  if (key !== liveKey || live === null) { live = m; procs = ps; liveKey = key; version++; }
+  const key = JSON.stringify([[...m], [...ps], [...rc]]);
+  if (key !== liveKey || live === null) { live = m; procs = ps; rcs = rc; liveKey = key; version++; }
 }
 
 // needsHuman: which agent of a session the human is holding up, and why.
@@ -622,10 +637,12 @@ function buildSnapshot(hours) {
     t.endedAt = t.status === 'done' || t.status === 'failed' ? Math.max(...t.agents.map(x => x.lastActivity)) : null;
     t.lastActivity = Math.max(...t.agents.map(x => x.lastActivity));
     { const oc = chats.get(t.id); t.owned = !!oc; t.chat = oc ? { alive: oc.alive, busy: oc.busy, pending: oc.pending.size } : null; const ep = ext.get(t.id); t.ext = ep && ep.size ? { pending: ep.size } : null;
-      const ps = peerState.get(t.id); t.peer = !oc && procs.has(t.id) ? { live: true, canSend: ps ? ps.canSend : true } : null; } // flags only, never text
+      const ps = peerState.get(t.id); t.peer = !oc && procs.has(t.id) ? { live: true, canSend: ps ? ps.canSend : true, rc: rcs.has(t.id) } : null; } // rc: a flag; the link itself only goes out on the token-gated peer stream // flags only, never text
     // open = a live Claude Code process holds the session (~/.claude/sessions/<pid>.json, pid alive), else recent transcript activity
-    t.openBy = procs.has(t.id) ? 'process' : now - t.lastActivity < OPEN_MS ? 'recent' : null;
+    // a dashboard session that has ended is closed right away (Stop), not after OPEN_MS of quiet
+    t.openBy = procs.has(t.id) ? 'process' : chats.has(t.id) ? (chats.get(t.id).alive ? 'process' : null) : now - t.lastActivity < OPEN_MS ? 'recent' : null;
     t.closed = !t.openBy; if (t.closed) t.endedAt = t.lastActivity;
+    if (t.openBy !== 'process' && dismissed.has(t.id) && t.lastActivity <= dismissed.get(t.id)) continue; // dismissed: hidden until it has new activity
     const p = projOf(t.projectId);
     let pj = projMap.get(p.id);
     if (!pj) { pj = { id: p.id, name: p.name, cwd: p.cwd || '', branch: p.branch || '', tasks: [], lastActivity: 0, needsHuman: 0 }; projMap.set(p.id, pj); }
@@ -814,26 +831,39 @@ function transcriptCwd(fp) { // the first cwd in a transcript: where the session
   }
   return '';
 }
-function transcriptLog(fp, sid) { // the conversation so far, same reader and filter as the peer stream
-  const t = { sid, fp, offset: 0, carry: null, skip: false, log: [], seq: 0 };
-  try { const size = fs.statSync(fp).size; if (size > PEER_INIT_BYTES) { t.offset = size - PEER_INIT_BYTES; t.skip = true; } } catch { return []; }
-  for (let n = 0; n < 8; n++) { const es = tailRead(t); for (const e of es) tailAdd(t, e); if (!es.length && !t.carry) break; }
-  return t.log;
-}
-const resuming = new Set();
-function resumeTarget(sid) { // "Continue here": a terminal/desktop session that is closed there -> {fp, cwd, history}
+// "Continue with Remote Control": a session closed everywhere reopens in a NEW terminal window as
+// claude --resume <id> --remote-control, so it runs as a normal interactive session (its own approvals and questions)
+// and claude.ai/code reaches it. No shell gets user text: sid is checked by SID_RE, cwd comes from the transcript.
+const rcOpening = new Map(); // sessionId -> when its window was opened (one at a time, 60 s)
+function rcResume(sid) {
   if (typeof sid !== 'string' || !SID_RE.test(sid)) throw new HttpErr(400, 'bad session id');
-  const oc = chats.get(sid); if (oc && oc.alive) throw new HttpErr(409, 'this session already runs in the dashboard');
-  if (resuming.has(sid)) throw new HttpErr(409, 'this session is already being continued');
-  if (peerTarget(sid) || procs.has(sid)) throw new HttpErr(409, 'this session is still open in a terminal or the desktop app: close it there first (/exit), then continue it here');
+  const oc = chats.get(sid); if (oc && oc.alive) throw new HttpErr(409, 'this session runs in the dashboard');
+  if (sessProc(sid) || peerTarget(sid) || procs.has(sid)) throw new HttpErr(409, 'this session is still open: type /rc in it to turn on Remote Control');
+  if (Date.now() - (rcOpening.get(sid) || 0) < 60e3) throw new HttpErr(409, 'a window for this session is already opening');
   const fp = peerFile(sid); if (!fp) throw new HttpErr(404, 'no transcript for this session');
-  const cwd = transcriptCwd(fp); if (!cwd) throw new HttpErr(409, 'the transcript does not say which folder the session ran in');
-  return { fp, cwd: validCwd(cwd), history: transcriptLog(fp, sid) };
+  const tc = transcriptCwd(fp); if (!tc) throw new HttpErr(409, 'the transcript does not say which folder the session ran in');
+  const cwd = validCwd(tc), exe = findClaude(), args = ['--resume', sid, '--remote-control']; // the RC flag last: it takes an optional name
+  const go = (cmd, a, o) => new Promise((res, rej) => { let p; try { p = spawn(cmd, a, Object.assign({ cwd, shell: false, detached: true, stdio: 'ignore' }, o)); } catch (e) { return rej(e); }
+    p.once('error', rej); p.once('spawn', () => { p.unref(); res(); }); });
+  let run;
+  if (process.platform === 'win32') {
+    // Windows Terminal when installed, else a plain console window
+    run = go('wt.exe', ['-w', 'new', '-d', cwd, exe, ...args], { windowsHide: false })
+      .catch(() => go(exe, args, { windowsHide: false })); // detached on Windows = its own new console window
+  } else if (process.platform === 'darwin') {
+    const q = s => "'" + s.replace(/'/g, "'\\''") + "'"; // AppleScript string -> shell words, single-quoted
+    const line = 'cd ' + q(cwd) + ' && ' + [exe, ...args].map(q).join(' ');
+    run = go('osascript', ['-e', 'tell application "Terminal" to do script ' + JSON.stringify(line), '-e', 'tell application "Terminal" to activate']);
+  } else {
+    const term = ['x-terminal-emulator', 'gnome-terminal', 'konsole', 'xterm'];
+    run = term.reduce((p, t) => p.catch(() => go(t, t === 'gnome-terminal' ? ['--', exe, ...args] : ['-e', exe, ...args])), Promise.reject(new Error('no terminal')));
+  }
+  return run.then(() => { rcOpening.set(sid, Date.now()); }, e => { throw new HttpErr(500, 'cannot open a terminal window: ' + e.message); });
 }
 function chatStart(b) {
   if (!b || typeof b !== 'object') throw new HttpErr(400, 'bad body');
-  const resume = b.resume !== undefined ? String(b.resume) : '', rt = resume ? resumeTarget(resume) : null;
-  const cwd = rt ? rt.cwd : validCwd(b.cwd);
+  if (b.resume !== undefined) throw new HttpErr(400, 'Continue here was removed: use Continue with Remote Control');
+  const cwd = validCwd(b.cwd);
   const model = b.model ? String(b.model) : '', effort = b.effort ? String(b.effort) : '';
   if (model && !MODEL_RE.test(model)) throw new HttpErr(400, 'bad model');
   if (effort && !EFFORTS.has(effort)) throw new HttpErr(400, 'bad effort');
@@ -847,11 +877,8 @@ function chatStart(b) {
   if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);
   if (skipPerms) args.push('--dangerously-skip-permissions');
-  if (rt) { args.push('--resume', resume); resuming.add(resume); }
-  return new Promise((resolve0, reject0) => {
-    const resolve = v => { resuming.delete(resume); resolve0(v); }, reject = e => { resuming.delete(resume); reject0(e); };
-    const c = { id: '', cwd, model, effort, skipPerms, proc: null, alive: true, busy: true, cost: 0, startedAt: Date.now(), log: [], seq: 0, pending: new Map(), listeners: new Set(), buf: '', stopping: false, stopTimer: null, onId: null, resumed: !!rt };
-    if (rt) { for (const e of rt.history) c.log.push(Object.assign({}, e, { i: ++c.seq })); c.log.push({ i: ++c.seq, ts: Date.now(), kind: 'system', text: 'Continued here from the terminal: messages and prompts now go through the dashboard' }); }
+  return new Promise((resolve, reject) => {
+    const c = { id: '', cwd, model, effort, skipPerms, proc: null, alive: true, busy: true, cost: 0, startedAt: Date.now(), log: [], seq: 0, pending: new Map(), listeners: new Set(), buf: '', stopping: false, stopTimer: null, onId: null };
     let proc; try { proc = spawn(findClaude(), args, { cwd, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); } catch (e) { return reject(new HttpErr(500, 'cannot start claude: ' + e.message)); }
     c.proc = proc;
     let settled = false, errTail = '';
@@ -1118,6 +1145,25 @@ function peerTarget(sid) { // -> {pid, pipe, cwd, entrypoint, status} | null: a 
   if (best) delete best.at;
   return best;
 }
+function sessProc(sid) { // -> {pid, rc, entrypoint} | null: the newest live process holding the session, read fresh (no pipe needed)
+  let names; try { names = fs.readdirSync(SESS_DIR).filter(n => /^\d+\.json$/.test(n)); } catch { return null; }
+  let best = null;
+  for (const n of names) {
+    let o; try { o = JSON.parse(fs.readFileSync(path.join(SESS_DIR, n), 'utf8')); } catch { continue; }
+    if (!o || String(o.sessionId) !== sid || !Number.isInteger(o.pid) || o.pid <= 0 || n !== o.pid + '.json' || !alive(o.pid)) continue;
+    const at = +o.startedAt || 0;
+    if (!best || at > best.at) best = { pid: o.pid, rc: rcUrl(o.bridgeSessionId), entrypoint: String(o.entrypoint || ''), at };
+  }
+  if (best) delete best.at;
+  return best;
+}
+function sessClose(sid) { // Close: end the terminal/desktop process that holds this session (the user confirmed in the page)
+  const p = sessProc(sid); if (!p) throw new HttpErr(404, 'no running process holds this session');
+  if (p.pid === process.pid || p.pid === process.ppid) throw new HttpErr(409, 'refusing to stop the dashboard itself');
+  if (process.platform === 'win32') { try { spawn('taskkill', ['/PID', String(p.pid), '/T', '/F'], { shell: false, windowsHide: true, stdio: 'ignore' }).on('error', () => { }); } catch (e) { throw new HttpErr(500, 'cannot stop it: ' + e.message); } }
+  else try { process.kill(p.pid, 'SIGTERM'); } catch (e) { throw new HttpErr(500, 'cannot stop it: ' + e.code); }
+  setTimeout(() => { readLive(); peerMetaNow(sid); }, 1500);
+}
 function peerKey(pid) { // -> peerToken | null. Newest <pid>.<64hex>.key; never cached
   const re = new RegExp('^' + pid + '\\.[0-9a-f]{64}\\.key$');
   let names; try { names = fs.readdirSync(SESS_DIR).filter(n => re.test(n)); } catch { return null; }
@@ -1211,8 +1257,10 @@ function tailRead(t) { // new complete lines since t.offset -> entries; lines ov
 }
 function tailAdd(t, e) { e.i = ++t.seq; e.ts = e.at; delete e.at; t.log.push(e); if (t.log.length > PEER_LOG) t.log.shift(); return e; }
 function tailMeta(t) {
-  const target = peerTarget(t.sid), ps = peerState.get(t.sid), lv = live && live.get(t.sid);
-  return { live: !!target || procs.has(t.sid), canSend: !!target && (ps ? ps.canSend : true), status: lv ? lv.status : target ? target.status : '', entrypoint: target ? target.entrypoint : '' };
+  const target = peerTarget(t.sid), sp = sessProc(t.sid), ps = peerState.get(t.sid), lv = live && live.get(t.sid);
+  return { live: !!target || !!sp || procs.has(t.sid), canSend: !!target && (ps ? ps.canSend : true), status: lv ? lv.status : target ? target.status : '',
+    entrypoint: target ? target.entrypoint : sp ? sp.entrypoint : '', rc: sp ? sp.rc : null, canClose: !!sp,
+    opening: !sp && Date.now() - (rcOpening.get(t.sid) || 0) < 60e3 };
 }
 function tailOpen(sid) {
   const t = { sid, fp: peerFile(sid), offset: 0, carry: null, skip: false, log: [], seq: 0, listeners: new Set(), meta: null, live: false };
@@ -1242,7 +1290,7 @@ function peerTick() { // every second: new transcript lines and state changes to
 }
 async function peerRoute(req, res, u) {
   try {
-    const m = /^\/api\/peer\/([\w-]{1,64})\/(send|stream)$/.exec(u.pathname);
+    const m = /^\/api\/peer\/([\w-]{1,64})\/(send|stream|close|rc|open|dismiss)$/.exec(u.pathname);
     if (!m) return sendJson(res, 404, { error: 'not found' });
     const sid = m[1];
     if (m[2] === 'stream') {
@@ -1261,6 +1309,29 @@ async function peerRoute(req, res, u) {
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
     if (!tokenOk(req.headers['x-chat-token'])) return sendJson(res, 403, { error: 'bad token' });
     const body = await readJson(req) || {};
+    if (m[2] === 'dismiss') { // owned or not; only a session that is closed
+      const oc = chats.get(sid);
+      if (oc ? oc.alive : (procs.has(sid) || sessProc(sid))) throw new HttpErr(409, 'this session is still running: close it first');
+      dismissed.delete(sid); dismissed.set(sid, Date.now()); saveDismissed(); version++;
+      return sendJson(res, 200, { ok: true });
+    }
+    if (m[2] === 'close') {
+      const oc = chats.get(sid);
+      if (oc) { if (!oc.alive) throw new HttpErr(409, 'this session has already ended'); chatStop(oc); }
+      else sessClose(sid);
+      return sendJson(res, 200, { ok: true });
+    }
+    if (m[2] === 'open') { // open its claude.ai Remote Control link in the default browser (the desktop app's webview opens no new windows)
+      const p = sessProc(sid); if (!p || !p.rc) throw new HttpErr(404, 'Remote Control is not on for this session: type /rc in it');
+      const [cmd, a] = process.platform === 'win32' ? ['explorer.exe', [p.rc]] : process.platform === 'darwin' ? ['open', [p.rc]] : ['xdg-open', [p.rc]];
+      try { const c = spawn(cmd, a, { shell: false, detached: true, stdio: 'ignore', windowsHide: true }); c.on('error', () => { }); c.unref(); } catch (e) { throw new HttpErr(500, 'cannot open the browser: ' + e.message); }
+      return sendJson(res, 200, { ok: true, url: p.rc });
+    }
+    if (m[2] === 'rc') {
+      if (chats.has(sid)) throw new HttpErr(409, 'dashboard sessions have no Remote Control');
+      await rcResume(sid); peerMetaNow(sid);
+      return sendJson(res, 200, { ok: true });
+    }
     const text = body.text, priority = body.priority === undefined ? 'next' : body.priority;
     if (typeof text !== 'string' || !text.length || text.length > PEER_MAX_TEXT) throw new HttpErr(400, 'text must be 1-' + PEER_MAX_TEXT + ' characters');
     if (priority !== 'next' && priority !== 'now') throw new HttpErr(400, 'priority must be "next" or "now"');

@@ -26,7 +26,7 @@ export interface Task {
   agents: Agent[]; aicoId: string | null; aicoIdSource: string | null; mode: 'brainstorm' | 'cooler' | null;
   needsHuman: boolean; needReason: NeedReason | null; needSince: number | null;
   owned: boolean; chat: { alive: boolean; busy: boolean; pending: number } | null; ext: { pending: number } | null;
-  peer: { live: boolean; canSend: boolean } | null; openBy: 'process' | 'recent' | null; closed: boolean;
+  peer: { live: boolean; canSend: boolean; rc?: boolean } | null; openBy: 'process' | 'recent' | null; closed: boolean;
 }
 export interface Project { id: string; name: string; cwd: string; branch: string; color: string; tasks: Task[]; lastActivity: number; needsHuman: number }
 export interface DashEvent { id: string; t: number; type: 'start' | 'done' | 'failed' | 'needs' | 'wait'; agentId: string; projectId: string; level: 'ok' | 'warn' | 'error' | 'human'; text: string }

@@ -31,21 +31,29 @@ The panel shows each one as **Held by the session, not delivered**, with what to
 
 The dashboard never claims a permission mode to get past this check. It is a Claude Code safety control and stays your decision.
 
-Claude Code may ask you to approve a message from outside in the terminal. A message from the dashboard never counts as your consent there. To send without that, continue the session in the dashboard (below).
+Claude Code may ask you to approve a message from outside in the terminal. A message from the dashboard never counts as your consent there. To skip that, use Remote Control (below) and type on claude.ai instead.
 
 ## Questions with choices
 
 When Claude asks a question with choices (AskUserQuestion) while this panel is open, the question shows here as a form. The terminal waits while it is shown here. Close the panel and after 3 seconds the terminal asks instead. See [Answer prompts from the dashboard](permission-hook.md#askuserquestion-choices-forms).
 
-## Continue here
+## Remote Control
 
-A session that is closed in the terminal or the desktop app keeps its panel, with the history. The button reads **Continue here**: type a message and press it (or Enter). The dashboard then reopens the session as its own (`claude --resume <id>`, in the folder the session ran in), with your message as the next turn.
+To work with a terminal or desktop session from claude.ai or your phone, use Claude Code's Remote Control. It needs a claude.ai login.
 
-From then on it is a dashboard session: messages go straight through, and approvals and questions come as cards in the chat. It keeps its ID, so the terminal can pick it up again later with `claude --resume`. Stop it in the dashboard first.
+- **Open session with Remote Control on** (you typed `/rc` in it, or started it with `claude --remote-control`): the panel shows **Open in Claude ↗**. It opens the session's claude.ai link in your default browser.
+- **Open session without it:** the panel says to type `/rc` in that terminal or the Desktop app. The button shows up once it is on.
+- **Closed session:** **Continue with Remote Control** opens a new terminal window that runs `claude --resume <id> --remote-control` in the folder the session ran in. It is a normal interactive session, so approvals and questions work there and on claude.ai. When its link is ready, the dashboard opens it once. Refused while the session is still open somewhere.
 
-While the session is still open in a terminal or the desktop app, it is refused: "close it there first (/exit), then continue it here". Two programs writing one session would mix up its transcript.
+The link is read from `bridgeSessionId` in `~/.claude/sessions/<pid>.json`. It only goes to the page on the token-gated peer stream, never in `/api/state`.
 
-A dashboard session that has ended offers **Continue here** the same way.
+## Close and Dismiss
+
+- **Close session** (open terminal or desktop session): asks you to confirm, then ends that Claude Code process (`taskkill /T /F` on Windows, `SIGTERM` elsewhere). Anything typed but not sent in that terminal is lost.
+- **Stop** (dashboard session): ends it. The session counts as closed at once.
+- **Dismiss** (closed session): hides it from the list and the office. It comes back when it has new activity. Saved in `~/.claude/crate-works-dismissed.json` (session id and time only, kept 60 days).
+
+Routes, all `POST` with the chat token: `/api/peer/<id>/close`, `/api/peer/<id>/open`, `/api/peer/<id>/rc`, `/api/peer/<id>/dismiss`.
 
 ## Read-only
 

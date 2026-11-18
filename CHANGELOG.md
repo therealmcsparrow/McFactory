@@ -4,6 +4,20 @@ All notable changes to this project are listed here.
 
 ## Unreleased
 
+### Added
+
+-   **Remote Control** for terminal and desktop sessions. A session with `/rc` on shows **Open in Claude ↗**, which opens its claude.ai link. Without it, the panel says to type `/rc`. A closed session offers **Continue with Remote Control**: a new terminal window runs `claude --resume <id> --remote-control`, and its link opens once it is ready. See [Remote Control](documentation/peer-chat.md#remote-control).
+-   **Close session** for terminal and desktop sessions: ends that process, after you confirm.
+-   **Dismiss** for closed sessions: hides them from the list and the office until they have new activity.
+
+### Changed
+
+-   A stopped dashboard session counts as closed at once, instead of after 5 quiet minutes.
+
+### Removed
+
+-   **Continue here** (taking over a closed session with `claude --resume` in the dashboard). It clashed with the terminal and with approvals and questions. Use Continue with Remote Control instead. `POST /api/chat/start` no longer takes `resume`.
+
 ## 0.1.5 - 2026-11-18
 
 ### Fixed

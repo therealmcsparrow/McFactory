@@ -19,6 +19,7 @@
   interface ChatMeta {
     alive?: boolean; busy?: boolean; cost?: number; skipPermissions?: boolean; commands?: string[] | null; pending?: ChatRequest[];
     live?: boolean; canSend?: boolean; status?: string; role?: string; label?: string; sessionId?: string;
+    rc?: string | null; canClose?: boolean; opening?: boolean; entrypoint?: string;
   }
   /** One chat log line from the stream. */
   interface LogEntry { i: number; kind: string; text: string; via?: string; name?: string; error?: boolean; cost?: number; ms?: number }
@@ -142,11 +143,21 @@
   const nowWrap = h('label', { class: 'chat-now', hidden: true }, nowCb, 'Send now (interrupts)');
   const NOTE: Record<ChatMode, string> = { owned: 'Dashboard-started session. Messages stay on this machine.', peer: 'Terminal or desktop session. Your messages arrive as from a teammate; approvals stay in the permission cards.',
     agent: 'Subagent screen, read-only: its own text and tool names. To message the session, open its main agent.' };
-  const RESUME_NOTE = 'Closed in the terminal. Continue here reopens it in the dashboard (claude --resume): messages, approvals and questions then go straight through. Keep it closed in the terminal while it runs here.';
-  const resumedAt = new Map<string, number>(); // session id -> when Continue here started it: owned before the next snapshot says so
+  const RC_NOTE = 'Closed. Continue with Remote Control reopens it in a new terminal window (claude --resume … --remote-control): approvals and questions then work in that window and on claude.ai or your phone.';
   const isOffice = () => document.body.classList.contains('v-office'); // office view: a subagent's desk shows its own screen (server.js /api/agent/*); asked late, index.html sets the class after this script loads
   const noteEl = h('div', { class: 'chat-note', text: NOTE.owned });
-  const panel = h('section', { id: 'chat', class: 'chat', 'aria-label': 'Session chat', hidden: true }, head, logEl, pendEl, errEl, form, nowWrap, noteEl);
+  // session actions: Remote Control (open its claude.ai link / reopen a closed one with it), Close (ends the process, after a confirm), Dismiss (hide a finished one)
+  const rcOpenBtn = h('button', { class: 'cb-btn pri', type: 'button', text: 'Open in Claude ↗', title: 'Open this session on claude.ai (Remote Control) in your browser', onclick: () => act('open', rcOpenBtn) });
+  const rcGoBtn = h('button', { class: 'cb-btn pri', type: 'button', text: 'Continue with Remote Control', onclick: () => act('rc', rcGoBtn) });
+  const closeBtn = h('button', { class: 'cb-btn bad', type: 'button', text: 'Close session', onclick: () => { confirmEl.hidden = false; closeBtn.hidden = true; confirmYes.focus(); } });
+  const dismissBtn = h('button', { class: 'cb-btn', type: 'button', text: 'Dismiss', title: 'Hide this finished session from the list and the office (it comes back if it gets new activity)', onclick: () => act('dismiss', dismissBtn) });
+  const confirmYes = h('button', { class: 'cb-btn bad', type: 'button', text: 'Stop it', onclick: () => { confirmEl.hidden = true; act('close', closeBtn); } });
+  const confirmNo = h('button', { class: 'cb-btn', type: 'button', text: 'Cancel', onclick: () => { confirmEl.hidden = true; closeBtn.hidden = false; closeBtn.focus(); } });
+  const confirmTxt = h('span', { class: 'grow2' });
+  const confirmEl = h('div', { class: 'chat-confirm', role: 'group', 'aria-label': 'Confirm close', hidden: true }, confirmTxt, confirmYes, confirmNo);
+  const rcHint = h('div', { class: 'chat-rc-hint', hidden: true });
+  const actsEl = h('div', { class: 'chat-sacts' }, rcOpenBtn, rcGoBtn, closeBtn, dismissBtn);
+  const panel = h('section', { id: 'chat', class: 'chat', 'aria-label': 'Session chat', hidden: true }, head, actsEl, confirmEl, rcHint, logEl, pendEl, errEl, form, nowWrap, noteEl);
   detailEl?.append(panel);
   input.addEventListener('keydown', e => {
     if (!cmdList.hidden && !e.isComposing) {
@@ -169,9 +180,11 @@
     if (cur && cur.id === id && cur.mode === mode) { maybeFocus(); return; }
     closeStream(); logEl.replaceChildren(); pendEl.replaceChildren(); errEl.textContent = ''; cmdClose();
     const peer = mode === 'peer', agent = mode === 'agent'; // agent: read-only, nothing to send, stop or answer
-    stopBtn.hidden = peer || agent; nowWrap.hidden = !peer; form.hidden = agent; nowCb.checked = false; noteEl.textContent = NOTE[mode]; headCost.textContent = ''; headSkip.hidden = true;
+    stopBtn.hidden = peer || agent; stopBtn.disabled = false; nowWrap.hidden = !peer; form.hidden = agent; nowCb.checked = false; noteEl.textContent = NOTE[mode]; headCost.textContent = ''; headSkip.hidden = true;
     panel.setAttribute('aria-label', agent ? 'Subagent screen (read-only)' : 'Session chat'); logEl.setAttribute('aria-label', agent ? 'Subagent screen log' : 'Chat log');
-    input.disabled = sendBtn.disabled = true; sendBtn.textContent = 'Send'; input.placeholder = 'Message, Enter to send, Shift+Enter for a new line';
+    input.disabled = sendBtn.disabled = true; input.placeholder = 'Message, Enter to send, Shift+Enter for a new line';
+    for (const b of [rcOpenBtn, rcGoBtn, closeBtn, dismissBtn]) { b.hidden = true; b.disabled = false; }
+    confirmEl.hidden = true; rcHint.hidden = true; actsEl.hidden = true;
     const c: ChatCur = cur = { id, mode, es: null, meta: null, pendKey: '', last: 0 };
     const es = c.es = new EventSource(`/api/${agent ? 'agent' : peer ? 'peer' : 'chat'}/${encodeURIComponent(id)}/stream?token=${encodeURIComponent(TOKEN)}`);
     es.addEventListener('init', e => { if (cur !== c) return; const d: { meta: ChatMeta; log: LogEntry[] } = JSON.parse(e.data); logEl.replaceChildren(); c.last = 0; c.meta = d.meta; for (const x of d.log) addLog(x);
@@ -218,23 +231,32 @@
       return;
     }
     if (cur!.mode === 'peer') {
-      const closed = m.live === false; // closed in the terminal: the next message continues it here (claude --resume)
+      const closed = m.live === false;
       const ro = !closed && m.canSend === false ? 'Sending is not available for this session right now: read-only' : ''; // the server's meta is the only lock
-      head.dataset.s = closed ? 'ended' : m.status === 'busy' ? 'busy' : m.status === 'waiting' ? 'ask' : 'idle';
-      headTxt.textContent = closed ? 'Closed in the terminal' : m.status === 'busy' ? 'Working…' : m.status === 'waiting' ? 'Needs you' : 'Idle';
-      input.disabled = sendBtn.disabled = !!ro; nowCb.disabled = !!ro || closed; nowWrap.hidden = closed;
-      sendBtn.textContent = closed ? 'Continue here' : 'Send';
-      noteEl.textContent = closed ? RESUME_NOTE : NOTE.peer;
-      input.placeholder = ro || (closed ? 'Message to continue this session here' : 'Message, Enter to send, Shift+Enter for a new line');
+      head.dataset.s = closed ? (m.opening ? 'busy' : 'ended') : m.status === 'busy' ? 'busy' : m.status === 'waiting' ? 'ask' : 'idle';
+      headTxt.textContent = closed ? (m.opening ? 'Opening a terminal window…' : 'Closed') : m.status === 'busy' ? 'Working…' : m.status === 'waiting' ? 'Needs you' : 'Idle';
+      input.disabled = sendBtn.disabled = !!ro; nowCb.disabled = !!ro; form.hidden = closed; nowWrap.hidden = closed;
+      noteEl.textContent = closed ? RC_NOTE : NOTE.peer;
+      input.placeholder = ro || 'Message, Enter to send, Shift+Enter for a new line';
+      const where = m.entrypoint === 'claude-desktop' ? 'the Desktop app' : 'its terminal';
+      rcOpenBtn.hidden = closed || !m.rc; rcGoBtn.hidden = !closed; rcGoBtn.disabled = !!m.opening;
+      closeBtn.hidden = closed || !m.canClose || !confirmEl.hidden; if (closed || !m.canClose) confirmEl.hidden = true;
+      dismissBtn.hidden = !closed || !!m.opening;
+      confirmTxt.textContent = `Stop this session? This ends its process in ${where}.`;
+      rcHint.hidden = closed || !!m.rc;
+      rcHint.textContent = `To use it from claude.ai or your phone: type /rc in ${where}. An Open in Claude button then shows here.`;
+      actsEl.hidden = [rcOpenBtn, rcGoBtn, closeBtn, dismissBtn].every(b => b.hidden);
+      if (wantRc && Date.now() - wantRc.at > 120e3) wantRc = null;
+      if (wantRc && wantRc.id === cur!.id && m.rc) { wantRc = null; act('open', rcOpenBtn); } // the reopened session has its link: open it once
       return;
     }
     const asking = m.pending!.length > 0;
     head.dataset.s = !m.alive ? 'ended' : asking ? 'ask' : m.busy ? 'busy' : 'idle';
     headTxt.textContent = !m.alive ? 'Ended' : asking ? 'Needs you' : m.busy ? 'Working…' : 'Your turn';
     headCost.textContent = m.cost ? money(m.cost) : '';
-    stopBtn.disabled = !m.alive; input.disabled = sendBtn.disabled = false; // ended: the next message continues it (claude --resume)
-    sendBtn.textContent = m.alive ? 'Send' : 'Continue here';
-    input.placeholder = m.alive ? 'Message, Enter to send, Shift+Enter for a new line' : 'Session ended. A message continues it here';
+    stopBtn.hidden = !m.alive; input.disabled = sendBtn.disabled = !m.alive; form.hidden = !m.alive;
+    dismissBtn.hidden = !!m.alive; actsEl.hidden = dismissBtn.hidden;
+    input.placeholder = 'Message, Enter to send, Shift+Enter for a new line';
     const key = m.pending!.map(r => r.request_id).join(',');
     if (key !== cur!.pendKey) { cur!.pendKey = key; pendEl.replaceChildren(...m.pending!.map(renderPending)); }
   }
@@ -242,21 +264,13 @@
     const text = input.value.trim(); if (!text || !cur || sendBtn.disabled) return;
     errEl.textContent = ''; sendBtn.disabled = true;
     const c = cur, peer = c.mode === 'peer';
-    const resume = !!c.meta && (peer ? c.meta.live === false : c.meta.alive === false); // closed or ended: reopen it as a dashboard session
-    if (resume) sendBtn.textContent = 'Continuing…';
     try {
-      if (resume) {
-        const r = await post('/api/chat/start', { resume: c.id, prompt: text });
-        input.value = ''; input.style.height = '';
-        if (r.id) { resumedAt.set(r.id, Date.now()); closeStream(); showFor(r.id, 'owned'); openSession(r.id); } // the snapshot marks it owned within a second
-        return;
-      }
       if (peer) await post(`/api/peer/${encodeURIComponent(c.id)}/send`, { text, priority: nowCb.checked ? 'now' : 'next' });
       else await post(`/api/chat/${encodeURIComponent(c.id)}/send`, { text });
       input.value = ''; input.style.height = ''; nowCb.checked = false;
     } catch (e) { errEl.textContent = (e as Error).message; } // a 502 locks via the server's meta push; a 404 only shows the error
     finally {
-      if (cur === c && (peer || resume)) { if (c.meta) paint(); if (resume) sendBtn.disabled = false; }
+      if (cur === c && peer) { if (c.meta) paint(); }
       else if (cur && cur.meta && cur.meta.alive) sendBtn.disabled = false;
       if (!input.disabled) input.focus();
     }
@@ -265,6 +279,16 @@
     if (!cur) return; errEl.textContent = ''; stopBtn.disabled = true;
     try { await post(`/api/chat/${encodeURIComponent(cur.id)}/stop`); } catch (e) { errEl.textContent = (e as Error).message; stopBtn.disabled = false; }
   }
+  async function act(what: 'open' | 'rc' | 'close' | 'dismiss', btn: HTMLButtonElement) {
+    if (!cur) return; const c = cur; errEl.textContent = ''; btn.disabled = true;
+    try {
+      await post(`/api/peer/${encodeURIComponent(c.id)}/${what}`);
+      if (what === 'dismiss' && cur === c) { showFor(null); showExt(null); } // the next snapshot drops it from the list and the office
+      if (what === 'rc') wantRc = { id: c.id, at: Date.now() }; // open its link once the new window has Remote Control on
+    } catch (e) { if (cur === c) errEl.textContent = (e as Error).message; }
+    finally { btn.disabled = false; if (what === 'close' && cur === c) closeBtn.hidden = false; if (cur === c && c.meta) paint(); }
+  }
+  let wantRc: { id: string; at: number } | null = null;
   async function answer(r: ChatRequest, body: AnswerBody, btns: HTMLButtonElement[]) {
     errEl.textContent = ''; btns.forEach(b => { b.disabled = true; });
     try { await post(`/api/chat/${encodeURIComponent(cur!.id)}/answer`, Object.assign({ request_id: r.request_id }, body)); input.focus(); }
@@ -324,7 +348,7 @@
   // The terminal shows the same prompt: first answer wins. Only tool name + a short summary come from the server.
   let extTasks = new Map<string, Task>(); // taskId -> task with t.ext.pending > 0 (never owned sessions)
   let peerTasks = new Set<string>(); // taskIds of live terminal/desktop sessions the dashboard can message (server.js /api/peer/*)
-  let sessTasks = new Set<string>(); // taskIds of every session the dashboard did not start (open or closed): the panel shows them, closed ones offer Continue here
+  let sessTasks = new Set<string>(); // taskIds of every session the dashboard did not start (open or closed): the panel shows them, closed ones offer Remote Control and Dismiss
   const extErr = h('div', { class: 'chat-err', role: 'alert' });
   const extPend = h('div', { class: 'chat-pend', 'aria-label': 'Prompts waiting for you' });
   const extPanel = h('section', { id: 'ext-prompt', class: 'chat ext', 'aria-label': 'Prompt waiting for you', hidden: true },
@@ -360,8 +384,8 @@
   let lastDetail: Detail = null;
   window.addEventListener('factory:detail', e => { lastDetail = (e as CustomEvent<Detail>).detail || null; refreshDetail(); });
   function refreshDetail() {
-    const id = taskOfDetail(lastDetail), isOwned = !!(id && (owned.has(id) || Date.now() - (resumedAt.get(id) || 0) < 15e3));
-    const isPeer = !isOwned && !!id && (peerTasks.has(id) || sessTasks.has(id) || (cur && cur.mode === 'peer' && cur.id === id)); // closed ones too: Continue here
+    const id = taskOfDetail(lastDetail), isOwned = !!(id && owned.has(id));
+    const isPeer = !isOwned && !!id && (peerTasks.has(id) || sessTasks.has(id)); // closed ones too: Continue with Remote Control, Dismiss
     const sub = isOffice() && lastDetail && lastDetail.kind === 'agent' && /^a-/.test(lastDetail.id) ? lastDetail.id : null; // office view: a subagent shows its own screen
     if (sub) showFor(sub, 'agent'); else showFor(isOwned || isPeer ? id : null, isPeer ? 'peer' : 'owned');
     showExt(!isOwned && id && extTasks.has(id) ? id : null); updateAlert();
