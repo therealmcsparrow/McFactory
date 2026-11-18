@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { easeOut, easeIO } from '../common/math.js';
 import type { FSAtCrates } from './state.js';
-import type { Arm, Crate } from './types.js';
+import type { Arm, Crate, Dock, Hall } from './types.js';
 
 export function makeCrates(FS: FSAtCrates) {
   const { mat, Z0, scene, crateCol, W, BELT_TOP, facs, arms, docks, QI, XC, R, dockSpot, tv, arc, seg, mS, mM } = FS;
@@ -47,5 +47,13 @@ export function makeCrates(FS: FSAtCrates) {
     }
     crates.count = crHW; crates.instanceMatrix.needsUpdate = true; if (crColDirty) { crates.instanceColor!.needsUpdate = true; crColDirty = false; }
   }
-  return { CRATE_BASE, cr, stats, newCrate, dropCrate, cratesFrame };
+  // loads handed over from the last view (app/carry.ts): straight onto the hall's dock, waiting for a robot
+  function dockCrate(dk: Dock, col: THREE.Color) { const c = newCrate(col); if (!c) return; c.dock = dk; c.st = 'dock'; c.qi = dk.queue.length; dk.queue.push(c); dockSpot(dk, c.qi, c.w); }
+  // the hall each crate still on its way belongs to, and its colour (for the hand-over); a crate dropping onto the pile is home
+  const tc = new THREE.Color();
+  function inTransit(): [Hall, THREE.Color][] { const out: [Hall, THREE.Color][] = [];
+    for (const c of cr) { if (c.dead || c.st === 'drop') continue; const f = c.st === 'belt' ? c.line && c.line.f : c.st === 'cross' ? c.f : c.dock && c.dock.f;
+      if (f) { crates.getColorAt(c.i, tc); out.push([f, tc.clone()]); } }
+    return out; }
+  return { CRATE_BASE, cr, stats, newCrate, dropCrate, cratesFrame, dockCrate, inTransit };
 }

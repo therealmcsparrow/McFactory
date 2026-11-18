@@ -65,11 +65,12 @@ export function makeFrame(FS: FSAtFrame) {
     cratesFrame(dt);
     tickSculptures(dt);
     if ((subT += dt) > .5) { subT = 0; for (const f of facs.values()) { const q = f.dock.queue.length; if (q !== f.q) { f.q = q; setText(f.subQ, q ? `dock: ${q} crate${q === 1 ? '' : 's'} waiting` : 'dock clear'); } } }
-    const prevShown = Math.floor(FS.shown); FS.shown = reduced ? FS.target : damp(FS.shown, FS.target, 1.6, dt); if (Math.abs(FS.shown - FS.target) < .5) FS.shown = FS.target;
+    const snap = reduced || FS.snapPile; FS.snapPile = false;
+    const prevShown = Math.floor(FS.shown); FS.shown = snap ? FS.target : damp(FS.shown, FS.target, 1.6, dt); if (Math.abs(FS.shown - FS.target) < .5) FS.shown = FS.target;
     const n = Math.round(FS.shown); let dirtyC = false, dirtyM = false;
     for (let i = 0; i < CAP; i++) {
       const want = i < n ? 1 : 0; const cur = stackScale[i]; if (cur === want) continue;
-      const nx = reduced ? want : clamp(cur + (want ? dt * 4 : -dt * 6), 0, 1); stackScale[i] = nx;
+      const nx = snap ? want : clamp(cur + (want ? dt * 4 : -dt * 6), 0, 1); stackScale[i] = nx;
       if (want && cur === 0) { const f = (i + .5) / Math.max(n, 1); const col = (FS.stackColors.find(x => f <= x[0] + 1e-6) || FS.stackColors[FS.stackColors.length - 1] || [0, new THREE.Color('#c9a77a')])[1]; stack.setColorAt(i, col); dirtyC = true; }
       const p = stackPos(i); p.y += (1 - easeOut(nx)) * .8; mS.setScalar(Math.max(.0001, easeOut(nx))); mM.compose(p, mQ.identity(), mS); stack.setMatrixAt(i, mM); dirtyM = true;
     }
