@@ -56,7 +56,7 @@ export function makeSync(FS: FSAtSync) {
     roads();
     const T = DS.totals();
     FS.unit = 50000; while (T.tokens / FS.unit > CAP) FS.unit *= 2;
-    FS.target = Math.floor(T.tokens / FS.unit);
+    FS.target = Math.floor(T.tokens / FS.unit); if (initial) { FS.shown = FS.target; FS.snapPile = true; } // the pile is there at once on load (a view switch reloads the page), it does not grow from zero
     // pile composition by role (same colours as the crates feeding it)
     const br = DS.byRole(); const tot = Math.max(1, br.reduce((s, m) => s + m.tokens, 0)); FS.stackColors = []; let acc = 0;
     for (const r of br) { acc += r.tokens / tot; FS.stackColors.push([acc, crateCol(r.role)]); }

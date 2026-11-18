@@ -9,6 +9,7 @@
 // builds its meshes and returns what the later parts need; buildOffice merges every result into OS in order. Values
 // that more than one part reassigns (focusF, pov, net, simT, stackN ...) live on OS itself, and a part that calls into
 // a later part does so through OS at call time (OS.walkIn, OS.rob ...), never at build time.
+import * as THREE from 'three';
 import { reduced } from '../common/dom.js';
 import { agentIndex, taskById } from '../app/data.js';
 import type { PickKind, SceneApi, SceneCtx } from '../common/types.js';
@@ -45,6 +46,7 @@ import { walkNet, roadTest } from './walknet.js';
 import { makeBubbles } from './bubbles.js';
 import { makeCrossings } from './crossings.js';
 import { makePatrols } from './patrol.js';
+import { carryOnLeave, takeCarry, type Carry } from '../app/carry.js';
 import type { P2 } from '../common/types.js';
 
 /** The probes' view of a vehicle of any kind: they print the armoured car's fields for every vehicle (absent ones read undefined). */
@@ -82,6 +84,15 @@ export function buildOffice(ctx: SceneCtx, kit: OfficeKit): SceneApi {
     OS.sync = (st, ev, d, i) => { s0(st, ev, d, i); const b = shopForce ?? busyness(st); life.setBusy(b); visit.setBusy(b); deliv.setBusy(b); }; }
   // ── patrol cars cruising the town, now and then a speeder pulled over for a ticket (patrol.ts; setting patrols): stepped after the frame (after stepFolk) ──
   const patrols = makePatrols(OS); { const f0 = OS.frame; OS.frame = (dt, t) => { f0(dt, t); patrols.frame(dt, t); }; }
+  // ── drives in transit across a view switch (app/carry.ts): the last view's loads go onto the dock piles after the first sync; ours (on the data
+  //    lines, in the dock piles, in the armoured cars) are handed on when the page goes ──
+  { const s0 = OS.sync; let carry: Carry | null = takeCarry();
+    OS.sync = (st, ev, d, i) => { s0(st, ev, d, i); if (!carry) return; for (const [id, cols] of carry) { const F = OS.bldgs.get(id); if (F) for (const h of cols) OS.dockPush(F, new THREE.Color(h)); } carry = null; };
+    carryOnLeave(() => { const m: Carry = new Map(), add = (F: { id: string } | null, c: THREE.Color) => { if (!F) return; let a = m.get(F.id); if (!a) m.set(F.id, a = []); a.push('#' + c.getHexString()); };
+      for (const F of OS.bldgs.values()) for (const c of F.dock.q) add(F, c);
+      for (const p of OS.pulses) if (!p.deco) add(p.F, p.c);
+      for (const T of OS.trucks) for (const c of T.load) add(T.F, c);
+      return m; }); }
   // ── ?carsPreview=1: the vehicle models parked in rows on empty ground (vehicles/cars-preview.ts); loaded only then ──
   if (new URLSearchParams(location.search).has('carsPreview')) void import('./vehicles/cars-preview.js').then(m => m.carsPreview(OS));
   if (new URLSearchParams(location.search).has('parkPreview')) void import('./park-preview.js').then(m => m.parkPreview(OS)); // ?parkPreview=1: a playground with kids playing (park-preview.ts, kids.ts) at (96, -40)

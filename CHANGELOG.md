@@ -4,6 +4,10 @@ All notable changes to this project are listed here.
 
 ## Unreleased
 
+### Fixed
+
+-   Switching between Factory and Office no longer loses the crates and drives. The warehouse pile is there at once when the view opens; before, it grew again from zero. Loads still on their way (crates on belts, docks and robots; drives on the data lines, in the dock piles and in the armoured cars) are handed to the next view and wait on that project's dock. The hand-over (`src/app/carry.ts`: project id to load colours, in this tab's `sessionStorage`, kept for a minute) works the same for any later view.
+
 ### Changed
 
 -   The project is renamed from Crate Works Live to **McFactory**: page and window title, package names, the desktop app (`productName` and identifier `com.mcsparrow.mcfactory`) and the docs. The files in `~/.claude` are now `mcfactory-limits.json`, `mcfactory-limits.jsonl` and `mcfactory-dismissed.json`; on first start the server moves the old `crate-works-*` files over, so no limits history or dismissed sessions are lost. The desktop app reads `MCFACTORY_PORT` and still accepts the old `CRATE_WORKS_PORT`.

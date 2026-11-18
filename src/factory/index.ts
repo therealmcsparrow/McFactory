@@ -22,6 +22,7 @@ import { makeTowTruck } from './vehicles/tow-truck.js';
 import { makeSync } from './sync.js';
 import { makeFrame } from './frame.js';
 import { makeFocus } from './focus.js';
+import { carryOnLeave, takeCarry, type Carry } from '../app/carry.js';
 
 export function buildScene(ctx: SceneCtx) {
   const FS = { ctx } as FactoryState;
@@ -38,6 +39,10 @@ export function buildScene(ctx: SceneCtx) {
   Object.assign(FS, makeSync(FS)); // data sync, boards, hover
   Object.assign(FS, makeFrame(FS)); // per-frame update
   Object.assign(FS, makeFocus(FS)); // labels, focus, camera framing
+  // ── loads in transit across a view switch (app/carry.ts): the last view's loads go onto the docks after the first sync, ours are handed on when the page goes ──
+  { const s0 = FS.sync; let carry: Carry | null = takeCarry();
+    FS.sync = (st, ev, d, i) => { s0(st, ev, d, i); if (!carry) return; for (const [id, cols] of carry) { const f = FS.facs.get(id); if (f) for (const h of cols) FS.dockCrate(f.dock, new THREE.Color(h)); } carry = null; };
+    carryOnLeave(() => { const m: Carry = new Map(); for (const [f, c] of FS.inTransit()) { let a = m.get(f.id); if (!a) m.set(f.id, a = []); a.push('#' + c.getHexString()); } return m; }); }
   const { docks, cr, robots, arms, facs, lineIdx, stats, frame, dyingArms, pathAt, BELT_TOP, CRATE_BASE, G, stopOf, newCrate, crateCol, W, XC, BRK, controls, camera, sync, layoutLabels, focusOf, anchorOf, hover, home, markLine } = FS;
   // read-only probe for tests: crate accounting and robot states
   window.__fac = {

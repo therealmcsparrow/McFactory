@@ -28,6 +28,7 @@
     "externalBin": ["binaries/server"],
     "resources": {
       "../../dist/app.css": "web/app.css",
+      "../../dist/app/carry.js": "web/app/carry.js",
       "../../dist/app/data.js": "web/app/data.js",
       "../../dist/app/hud-office-button.js": "web/app/hud-office-button.js",
       "../../dist/app/hud.js": "web/app/hud.js",

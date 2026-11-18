@@ -25,7 +25,7 @@ import type { makeFocus } from './focus.js';
 /** Values more than one part reassigns; they live on FS so every part sees the current value. */
 export interface SharedFactoryState {
   ctx: SceneCtx;
-  unit: number; shown: number; target: number;
+  unit: number; shown: number; target: number; snapPile?: boolean;
   /** warehouse pile colours: [first pile slot, colour] runs */
   stackColors: [number, THREE.Color][];
   rateAcc: number; fleetWant: number; routeRoads: boolean;
