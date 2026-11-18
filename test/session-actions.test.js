@@ -78,7 +78,7 @@ test('Dismiss hides a finished session until it has new activity, and is saved',
   sess.kill(); fs.rmSync(sess.file);
   assert.ok(await until(async () => (await act(sid, 'dismiss')).status === 200));
   assert.ok(await until(async () => !(await h.task(sid))), 'hidden');
-  const saved = JSON.parse(fs.readFileSync(path.join(h.dir, 'crate-works-dismissed.json'), 'utf8'));
+  const saved = JSON.parse(fs.readFileSync(path.join(h.dir, 'mcfactory-dismissed.json'), 'utf8'));
   assert.ok(saved[sid] > 0);
   await wait(50); h.append(fp, [line(sid, { message: { role: 'user', content: 'again' } })]);
   assert.ok(await until(() => h.task(sid)), 'back after new activity');

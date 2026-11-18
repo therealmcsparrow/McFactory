@@ -1,4 +1,4 @@
-# Contributing to Crate Works Live
+# Contributing to McFactory
 
 Thank you for helping. This page covers how to report a problem, suggest an idea, set up the project and send a change. The community rules are in the [Code of Conduct](CODE_OF_CONDUCT.md).
 
@@ -59,4 +59,4 @@ Open pull requests against `main`. Keep each pull request to one change where yo
 
 ## Licence
 
-Crate Works Live is released under the MIT Licence (see [LICENSE](LICENSE)). By sending a contribution, you agree that it is released under the same licence.
+McFactory is released under the MIT Licence (see [LICENSE](LICENSE)). By sending a contribution, you agree that it is released under the same licence.

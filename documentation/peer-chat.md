@@ -74,7 +74,7 @@ The link is read from `bridgeSessionId` in `~/.claude/sessions/<pid>.json`. It o
 
 - **Close session** (open terminal or desktop session): asks you to confirm, then ends that Claude Code process (`taskkill /T /F` on Windows, `SIGTERM` elsewhere). Anything typed but not sent in that terminal is lost.
 - **Stop** (dashboard session): ends it. The session counts as closed at once.
-- **Dismiss** (closed session): hides it from the list and the office. It comes back when it has new activity. Saved in `~/.claude/crate-works-dismissed.json` (session id and time only, kept 60 days).
+- **Dismiss** (closed session): hides it from the list and the office. It comes back when it has new activity. Saved in `~/.claude/mcfactory-dismissed.json` (session id and time only, kept 60 days).
 
 Routes, all `POST` with the chat token: `/api/peer/<id>/close`, `/api/peer/<id>/open`, `/api/peer/<id>/rc`, `/api/peer/<id>/dismiss`.
 

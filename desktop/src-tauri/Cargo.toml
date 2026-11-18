@@ -1,7 +1,7 @@
 [package]
-name = "crate-works-live"
+name = "mcfactory"
 version = "0.1.9"
-description = "Crate Works Live desktop app: the factory dashboard in a window, with server.js as a sidecar"
+description = "McFactory desktop app: the factory dashboard in a window, with server.js as a sidecar"
 edition = "2021"
 publish = false
 

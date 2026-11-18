@@ -46,14 +46,14 @@ test('status line saves only the limit numbers and prints them', async () => {
     const r = statusline(h, limitsInput(23, 41));
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /5h 23%/); assert.match(r.stdout, /week 41%/);
-    const raw = fs.readFileSync(path.join(h.dir, 'crate-works-limits.json'), 'utf8');
+    const raw = fs.readFileSync(path.join(h.dir, 'mcfactory-limits.json'), 'utf8');
     for (const s of ['SECRET-SID', 'secret', 'Opus']) assert.equal(raw.includes(s), false, s);
     const lim = JSON.parse(raw);
     assert.equal(lim.windows.five_hour.pct, 23); assert.equal(lim.windows.seven_day.pct, 41);
     assert.ok(lim.windows.five_hour.resetsAt > Date.now() && lim.windows.seven_day.resetsAt > Date.now() + 2 * 86400e3);
     statusline(h, limitsInput(23, 41)); // unchanged: no new history line
     statusline(h, limitsInput(25, 42));
-    const hist = fs.readFileSync(path.join(h.dir, 'crate-works-limits.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
+    const hist = fs.readFileSync(path.join(h.dir, 'mcfactory-limits.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
     assert.deepEqual(hist.map(x => x.w.seven_day), [41, 42]);
   } finally { await h.stop(); }
 });
@@ -63,7 +63,7 @@ test('status line without limits still prints and saves nothing', async () => {
   try {
     const r = statusline(h, { model: { display_name: 'Opus 5.5' } });
     assert.equal(r.status, 0); assert.match(r.stdout, /Opus 5\.5/);
-    assert.equal(fs.existsSync(path.join(h.dir, 'crate-works-limits.json')), false);
+    assert.equal(fs.existsSync(path.join(h.dir, 'mcfactory-limits.json')), false);
   } finally { await h.stop(); }
 });
 

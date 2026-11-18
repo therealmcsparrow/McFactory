@@ -30,8 +30,8 @@ Limits show after the next reply in a session that is signed in to a Claude plan
 
 Only the limit percentages and reset times:
 
-- `~/.claude/crate-works-limits.json`: the latest reading;
-- `~/.claude/crate-works-limits.jsonl`: one line per change, trimmed at 200 KB.
+- `~/.claude/mcfactory-limits.json`: the latest reading;
+- `~/.claude/mcfactory-limits.jsonl`: one line per change, trimmed at 200 KB.
 
 No session ID, folder, path or model name is stored.
 
