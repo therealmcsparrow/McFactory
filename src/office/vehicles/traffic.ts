@@ -17,7 +17,7 @@ export function makeTraffic(OS: OSAtTraffic) {
   // each vehicle is two circles; before it moves it samples its own line ahead and brakes for whatever is there. Forecourts and the
   // bank apron take one moving vehicle at a time (a lock taken on the street), so nobody has to pass or back up into somebody else.
   const STEP = .3, ACC = 4, DEC = 6, MG = .25, SIRV = 1.35, vehs: AnyVehicle[] = [], apron: Lock = { who: null }, spawnQ: SportsCar[] = [], tstat = { vanish: 0, sq: 0 }; // tstat: how many vehicles faded out to get unstuck (probe)
-  const q = { x: 0, z: 0, i: 0, rot: 0 }, q1 = { x: 0, z: 0, i: 0 }, q2 = { x: 0, z: 0, i: 0 };
+  const q = { x: 0, z: 0, i: 0, rot: 0 }, q1 = { x: 0, z: 0, i: 0 }, q2 = { x: 0, z: 0, i: 0 }, qf = { x: 0, z: 0, i: 0, rot: 0 };
   function mkLeg(P: P2[], o: LegOpts = {}): OfficeLeg {
     let R = [P[0].slice() as P2], px = P[0][0], pz = P[0][1], need = STEP;
     for (let i = 1; i < P.length; i++) { const dx = P[i][0] - px, dz = P[i][1] - pz; let d = Math.hypot(dx, dz), ux = dx / (d || 1), uz = dz / (d || 1); while (d >= need) { px += ux * need; pz += uz * need; R.push([px, pz]); d -= need; need = STEP; } need -= d; px = P[i][0]; pz = P[i][1]; }
@@ -88,7 +88,9 @@ export function makeTraffic(OS: OSAtTraffic) {
   // ring too (J.c, inner radius 0): nobody stops in it, a short cut is not taken over it
   const jAt = (x: number, z: number) => { const Q = OS.net.jq; if (!Q) return null; for (const j of Q(x, z)) if (Math.abs(x - j.x) < 5 && Math.abs(z - j.z) < 5) return j; return null; };
   const ringAt = (x: number, z: number): Ring | null => rAt(x, z) || jAt(x, z)?.c || null;
-  const JSL = 9.2, inBox = (J: Junction, x: number, z: number, m = 0) => Math.abs(x - J.x) < RW + .3 + m && Math.abs(z - J.z) < RW + .3 + m;
+  // (the box reaches RW + 1.1 from the centre: a right turn cuts the corner and comes no nearer than about 4.5 m on either axis, so with a box
+  // of RW + .3 it never entered it, and jInfo never saw the junction: right-turners ran red lights and ignored who goes first)
+  const JSL = 9.2, JB = RW + 1.1, inBox = (J: Junction, x: number, z: number, m = 0) => Math.abs(x - J.x) < JB + m && Math.abs(z - J.z) < JB + m;
   const armOf = (J: Junction, x: number, z: number) => { const dx = x - J.x, dz = z - J.z; return Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 0 : 2) : (dz > 0 ? 1 : 3); };
   const TRN = ['U', 'R', 'S', 'L'] as const, q8 = { x: 0, z: 0, i: 0 };
   // the next junction on A's leg (once per tick): where it goes into the box and out (sIn, sOut), its stop line (sLine), the arms in and out, its turn
@@ -98,7 +100,7 @@ export function makeTraffic(OS: OSAtTraffic) {
       for (let s = Math.max(0, A.s - 12); s <= Math.min(L.len, A.s + 30); s += .5) { atL(L, s, q8); const J = jAt(q8.x, q8.z); if (!J || !inBox(J, q8.x, q8.z)) continue;
         let so = s; while (so + .25 <= L.len) { atL(L, so + .25, q8); if (!inBox(J, q8.x, q8.z)) break; so += .25; }
         if (so <= A.s - back) { s = so; continue; } // passed it: the next one
-        let sl = s; while (sl - .25 >= 0) { atL(L, sl - .25, q8); const ax = Math.abs(q8.x - J.x), az = Math.abs(q8.z - J.z); if (Math.max(ax, az) >= JSL || Math.min(ax, az) >= RW) break; sl -= .25; }
+        let sl = s; while (sl - .25 >= 0) { atL(L, sl - .25, q8); const ax = Math.abs(q8.x - J.x), az = Math.abs(q8.z - J.z); if (Math.max(ax, az) >= JSL || (Math.min(ax, az) >= RW && Math.max(ax, az) > JB + .6)) break; sl -= .25; } // (back round a right turn's corner too)
         atL(L, sl < s - 1 ? sl : Math.max(0, s - .5), q8); const ai = armOf(J, q8.x, q8.z); atL(L, Math.min(L.len, so + 3), q8); const ao = armOf(J, q8.x, q8.z);
         v = { J, sIn: s, sOut: so, sLine: sl, ai, ao, t: TRN[((ai - ao) % 4 + 4) % 4] }; break; } }
     A.jI = { t: OS.simT, leg: L, v }; return v; }
@@ -119,6 +121,13 @@ export function makeTraffic(OS: OSAtTraffic) {
       if (!J.lit && J.arms.length === 3 && I.ai % 2 !== J.main && P.ai % 2 === J.main && dIn < Math.max(14, O.v * 3.5) && !(P.t === 'R' && P.ao === I.ai) && !(I.t === 'R' && P.ai !== (I.ai + 1) % 4)) return 'giveway'; }
     if (noRoom(A, A.leg!, I.sOut + A.off + A.r + .3) || (OS.zeb && OS.zeb.ringHold(A, A.leg!, I.sOut, A.off + A.r + 4))) return 'junroom';
     void nose; return ''; }
+  // a siren unit goes first, but not into one already crossing: it waits at the line while a vehicle in the box (or one that has decided to go
+  // and can no longer stop) crosses its way. Everybody else still waits for it (sirenFor), so the box clears
+  function sirenBox(A: AnyVehicle, I: JInfo): string { const J = I.J;
+    for (const O of vehs) { if (O === A || O.ghost || O.parked || O.k < .05 || siren(O) || Math.abs(O.x - J.x) > 12 || Math.abs(O.z - J.z) > 12) continue; const P = jInfo(O);
+      if (!P || P.J !== J) { if (inBox(J, O.x, O.z)) return 'sirbox'; continue; }
+      if ((O.jc === J || inBox(J, O.x, O.z)) && O.s < P.sOut && jConflict(I, P)) return 'sirbox'; }
+    return ''; }
   // keep-clear boxes where an out road joins the street: nobody stops in one, a vehicle waits before it until there is room past it
   const inKc = (x: number, z: number) => OS.net.kc.some(k => Math.abs(x - k[0]) < k[2] && Math.abs(z - k[1]) < k[3]);
   const q6 = { x: 0, z: 0, i: 0, rot: 0 }, noRoom = (A: AnyVehicle, L: OfficeLeg, s: number) => { if (s > L.len) return false; pose(L, s, q6); const O = hits(A, q6.x, q6.z, q6.rot, MG, true); return !!O && O.v < 2; };
@@ -138,7 +147,7 @@ export function makeTraffic(OS: OSAtTraffic) {
   // just past it): then A goes first, or each would wait for the other
   const cutFor = (O: AnyVehicle, A: AnyVehicle) => { const c = O.cj; if (!c || O.v > .5 || c[3] - OS.simT > 4.05 || c[3] < OS.simT) return false; const dx = A.x - c[0], dz = A.z - c[1], al = dx * Math.sin(c[2]) + dz * Math.cos(c[2]);
     return al > -12 && al < 4 && Math.abs(dx * Math.cos(c[2]) - dz * Math.sin(c[2])) < 1.6; };
-  const sirenFor = (A: AnyVehicle, f: (x: number, z: number) => boolean) => { const r = !siren(A) && vehs.some(O => siren(O) && !O.ghost && !O.wl && !(O.by && O.v < .3) && !cutFor(O, A) && O.leg && soonAt(O, 26, f) && !soonAt(O, 26, (x, z) => Math.hypot(x - A.x, z - A.z) < 1.8)); if (r) A.sg = true; return r; }; // a siren unit that will be there soon, unless A is ahead of it on its way
+  const sirenFor = (A: AnyVehicle, f: (x: number, z: number) => boolean) => { const r = !siren(A) && vehs.some(O => siren(O) && !O.ghost && !(O.wl && O.wr !== 'sirbox' && O.wr !== 'zebra') && !(O.by && O.v < .3) && !cutFor(O, A) && O.leg && soonAt(O, 26, f) && !soonAt(O, 26, (x, z) => Math.hypot(x - A.x, z - A.z) < 1.8)); if (r) A.sg = true; return r; }; // a siren unit that will be there soon, unless A is ahead of it on its way
   // whoever wants in waits for anybody on the ring (either lane) that comes up to its entry within about 2.3 rad, unless that one signals it
   // will leave before it gets there (offRing); a siren unit waits only for one right at its entry
   // (one in a queue with a siren unit standing at its tail goes like a siren unit: the queue moves on and lets it through)
@@ -221,12 +230,25 @@ export function makeTraffic(OS: OSAtTraffic) {
       if (I && !siren(A)) { const hl = A.off + A.r, nose = A.s + hl;
         if (A.jc !== I.J) { if (nose > I.sLine + .3 || wv) A.jc = I.J;
           else { const w = jWait(A, I); if (w) { const l2 = Math.max(A.s, I.sLine - hl - .1); if (l2 < lim) { lim = l2; wr = w; } } else if (I.sLine - nose < A.v * A.v / (2 * DEC) + 1.5) A.jc = I.J; } }
-        if (A.jc === I.J && nose < I.sIn + .2 && noRoom(A, L, I.sOut + hl + .3)) { const l2 = Math.max(A.s, I.sIn - hl - .2); if (l2 < lim) { lim = l2; wr = 'junroom'; } } } }
+        // (and, decided to go but not in the box yet, for somebody stepping onto the zebra just past the exit: it can still stop at the box)
+        if (A.jc === I.J && nose < I.sIn + .2 && (noRoom(A, L, I.sOut + hl + .3) || (OS.zeb && OS.zeb.ringHold(A, L, I.sOut, hl + 4)))) { const l2 = Math.max(A.s, I.sIn - hl - .2); if (l2 < lim) { lim = l2; wr = 'junroom'; } } }
+      else if (I) { const hl = A.off + A.r, nose = A.s + hl; // a siren unit: only for one already crossing (sirenBox)
+        if (A.jc !== I.J) { if (nose > I.sLine + .3) A.jc = I.J;
+          else { const w = sirenBox(A, I); if (w) { const l2 = Math.max(A.s, I.sLine - hl - .1); if (l2 < lim) { lim = l2; wr = w; } } else if (I.sLine - nose < A.v * A.v / (2 * DEC) + .5) A.jc = I.J; } } } }
     if (!A.ghost && !wv && !siren(A) && !inKc(A.x, A.z)) for (let d = .2, dm = Math.max(5, A.v * A.v / (2 * DEC) + 2); d <= dm && A.s + d < L.len; d += .2) { atL(L, A.s + d, q1); if (!inKc(q1.x, q1.z)) continue;
       let de = d; while (de < d + 12 && A.s + de < L.len) { atL(L, A.s + de, q1); if (!inKc(q1.x, q1.z)) break; de += .2; }
       if (noRoom(A, L, A.s + de + A.off + A.r + .2)) { const l2 = Math.max(A.s, A.s + d - A.off - A.r - .3); if (l2 < lim) { lim = l2; wr = 'keepclear'; } } break; }
-    // zebras: people on foot on one, or stepping onto it, have the right of way: it stops before the stripes (crossings.ts; a siren unit does not)
-    if (!A.ghost && !siren(A) && OS.zeb) { const zs = OS.zeb.stopAt(A, L); if (zs != null && zs < lim) { lim = zs; wr = 'zebra'; } }
+    // zebras: people on foot on one, or stepping onto it, have the right of way: it stops before the stripes (crossings.ts). A siren unit too:
+    // walkers no longer step on when one comes (crossings.ts mayNow), but it lets those already crossing get off
+    if (!A.ghost && OS.zeb) { const zs = OS.zeb.stopAt(A, L); if (zs != null && zs < lim) { lim = zs; wr = 'zebra'; } }
+    // ...and anybody on foot right in its way anywhere else (a dog walker or the dog over a dropped kerb, across an out road or a shop's drive):
+    // it stops short of them. Only its path counts (half its width and .25 m): a dog kept off the road by the kerb (dogs.ts offRoad) is not in it.
+    // The path drifts with it onto the shoulder (pulling over: on a narrow road that is over the sidewalk)
+    if (!A.ghost && !L.rev && OS.feet) { const F = OS.feet(), look = A.v * A.v / (2 * DEC) + 3, hw = A.r + .25, R = A.off + A.r + look + 3;
+      let near = false; for (let i = 0; i < F.length; i += 2) if (Math.abs(F[i] - A.x) < R && Math.abs(F[i + 1] - A.z) < R) { near = true; break; }
+      if (near) for (let d = 0; d <= look && A.s + A.off + d <= L.len; d += .4) { pose(L, A.s + A.off + d, qf); const l = latAt(A, d); if (l) { qf.x -= Math.cos(qf.rot) * l; qf.z += Math.sin(qf.rot) * l; } let f = false;
+        for (let i = 0; i < F.length; i += 2) if (Math.abs(F[i] - qf.x) < hw && Math.abs(F[i + 1] - qf.z) < hw && Math.hypot(F[i] - qf.x, F[i + 1] - qf.z) < hw) { f = true; break; }
+        if (f) { const l2 = Math.max(A.s, A.s + d - A.r - .6); if (l2 < lim) { lim = l2; wr = 'feet'; } break; } } }
     // lane changes: it starts one only when the lane it moves into has a gap; else it slows down and waits at the start of the change, in its own lane
     if (!A.yw) A.lw = null; // (one on the shoulder waiting to get back into the lane keeps its own, see police.ts makeWay)
     let vl = Infinity;
@@ -271,7 +293,7 @@ export function makeTraffic(OS: OSAtTraffic) {
         if (O) { by = O; const xm = (siren(O) && !siren(A) || O.kind === 'truck') && Math.abs(OS.adiff(O.rot, A.rot)) > .5 ? 1.8 : 0; vt = Math.min(vt, Math.sqrt(2 * DEC * Math.max(0, d - .7 - xm))); break; } } } // a siren unit crossing in front: stop well back, its tail still swings round
     A.by = by; A.wr = by && (!wr || vt < Math.sqrt(2 * DEC * Math.max(0, lim - A.s))) ? 'by' : wr; A.v = vt > A.v ? Math.min(vt, A.v + ACC * dt) : Math.max(vt, A.v - DEC * 1.6 * dt);
     let ds = Math.max(0, Math.min(A.v * dt, lim - A.s));
-    if (ds > 0 && !A.ghost) { poseA(A, L, A.s + ds, ds); if (hits(A, q.x, q.z, q.rot, 0, false, A.rb)) { ds = 0; A.v = 0; } }
+    if (ds > 0 && !A.ghost) { poseA(A, L, A.s + ds, ds); const hb = hits(A, q.x, q.z, q.rot, 0, false, A.rb); if (hb) { ds = 0; A.v = 0; if (!by) { by = hb; A.by = hb; A.wr = 'by'; } } } // (a blocker found only here counts too: else it waits on nothing for good, the stuck escape below never starts)
     // stuck behind something for a long time: fade out, drive on unseen, come back where there is room (never drawn overlapping)
     A.wt = A.v < .05 && !A.ghost ? (A.wt || 0) + dt : 0; // standing still for any reason (probe)
     A.hz = !!(by && A.v < .05 && (by.haz || by.hz)); // in the queue behind a patrol car stopped in the lane

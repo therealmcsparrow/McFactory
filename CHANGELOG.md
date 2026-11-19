@@ -2,6 +2,17 @@
 
 All notable changes to this project are listed here.
 
+## Unreleased
+
+### Fixed
+
+-   Office view traffic:
+    -   Cars turning right no longer drive through a red light.
+    -   Patrol cars and the SWAT van on their way to a robbery take the shortest way: out of the station they may turn straight into a nearby junction instead of going round a roundabout.
+    -   Armoured cars no longer stand stuck at an office's entry. A robbery never takes place beside an office's forecourt, and a vehicle blocked only at its last move now counts as blocked, so it still gets out after a while.
+    -   Vehicles stop for walkers and dogs in their path anywhere on the road, not only at the zebras.
+    -   A unit with its siren on still has the right of way, but it stops for people already on a zebra and for vehicles already crossing the junction in front of it.
+
 ## 0.1.10 - 2026-11-18
 
 ### Added
