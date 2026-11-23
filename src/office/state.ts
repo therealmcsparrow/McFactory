@@ -58,6 +58,7 @@ export interface OfficeLate {
   bubbles?: Bubbles; // the one set of speech bubbles (bubbles.ts), made in index.ts after the makers, read by robbery (and traffic stops) at call time
   homeTrip?: (c: SportsCar) => HomeTrip | null; homeStay?: (c: SportsCar) => void; // finished agents going home (homes.ts), made in index.ts after the makers, read by sports cars at call time
   zeb?: Crossings; // who gives way at the zebras (crossings.ts), made in index.ts after the makers, read by traffic and the dog walkers at call time
+  feet?: () => number[]; // the dog walkers and their dogs on the go, as x, z pairs (dogs.ts), set in index.ts, read by traffic: nobody drives into one
 }
 
 type Base = SharedOfficeState & OfficeLate;

@@ -17,18 +17,27 @@ export function armouredCarGeometry({ bx, cy, merge }: Parts, guard: THREE.Buffe
 }
 
 export function makeArmouredCars(OS: OSAtArmouredCars) {
-  const { trucks, veh, mesh, G, VC, BAYX, BAYR, BAYN, BAYD, rowOf, bayZ, outZ, inZ, arc, drop, apron, bldgs, route, mkLeg, AZ, SVZ, LBZ, DOCKX, DOCK1, on, leftOut, leftIn, BOX, STZ, LO, vehs, BZ, mergeClear, SLIPX, MAXTRUCK, BIX, V, CARRY, trayAt, hop, stackAt, STK, take } = OS;
+  const { trucks, veh, mesh, G, VC, BAYX, BAYR, BAYN, BAYD, rowOf, bayZ, outZ, inZ, arc, drop, apron, bldgs, route, mkLeg, AZ, SVZ, BDZ, BDR, LB0, LB1, LOTX, LOTK, LOTZ, NSIDE, on, leftOut, leftIn, BOX, STZ, LO, vehs, BZ, mergeClear, SLIPX, MAXTRUCK, BIX, V, CARRY, trayAt, hop, stackAt, STK, take } = OS;
   const { scene } = OS.ctx;
   function addTruck() {
     const bay = trucks.length, T = veh('truck', mesh(G.truck, VC), BAYX(bay), bayZ(bay), 0), gd = mesh(G.guard, VC, true, false); scene.add(gd);
     Object.assign(T, { bay, gd, st: 'idle', load: [], F: null, want: 0, tmr: 0, gdk: 0, flying: 0, k: 0, slot: 0 }); trucks.push(T); return T;
   }
-  // the lay-by holds two armoured cars nose to tail: slot 0 at the front (by the out road), slot 1 behind it. The car in slot 1 leaves through
-  // slot 0, so it waits until slot 0 is empty and no car for slot 0 is on its way in close by; the car in slot 0 never waits for slot 1
-  const slotX = (T: ArmouredCar) => T.slot ? DOCK1 : DOCKX;
-  const front0 = (T: ArmouredCar, F: Office) => !trucks.some(O => O !== T && O.F === F && O.slot === 0 && (O.st === 'load' || (O.st === 'back' && !O.ret) || (O.st === 'out' && O.cl && Math.hypot(O.x - F.ox - SLIPX, O.z - F.oz - SVZ) < 30)));
-  // every car claims its slot on the in road, first come first served: free once no other car holds it or has claimed it (and, for the front
-  // slot, the rear car has gone: it leaves through the front slot). Until then it waits there; front0 counts only a car that has claimed
+  // the lay-by on the west side of the building (layout.ts: the service drive) holds two armoured cars nose to tail, facing south: slot 0 at the
+  // front (by the out road), slot 1 behind it. The car in slot 1 leaves through slot 0, so it waits until slot 0 is empty and no car for slot 0
+  // is on its way round (it has claimed the slot on the in road); the car in slot 0 never waits for slot 1
+  const slotZ = (T: ArmouredCar) => T.slot ? LB1 : LB0;
+  const front0 = (T: ArmouredCar, F: Office) => !trucks.some(O => O !== T && O.F === F && O.slot === 0 && (O.st === 'load' || (O.st === 'back' && !O.ret) || (O.st === 'out' && O.cl)));
+  // the service drive: from the in road straight up the side car park's aisle, left along the back of the building, left down the west side to its slot
+  const drive = (T: ArmouredCar, F: Office): P2[] => { const x = F.ox, z = F.oz, c = z + BDZ + BDR;
+    return [[x + SLIPX, c], ...arc(x + SLIPX - BDR, c, BDR, 0, -Math.PI / 2, 6), ...arc(x - SLIPX + BDR, c, BDR, -Math.PI / 2, -Math.PI, 6), [x - SLIPX, z + slotZ(T)]]; };
+  // a car on its way out of the side car park (reversing out of its spot or driving down the aisle): the drive runs up that aisle, so it waits on the in road
+  // how many cars for this office are on the drive (past the in road) and have not claimed their slot yet: the back of the building holds DRQ
+  const DRQ = 3, onDrive = (T: ArmouredCar, F: Office) => trucks.filter(O => O !== T && O.F === F && O.st === 'out' && !O.cl && !O.ghost && O.z < F.oz + SVZ - 1 && O.z > F.oz + BDZ - 3 && Math.abs(O.x - F.ox) < SLIPX + 2).length;
+  const lotBusy = (F: Office) => vehs.some(O => O.F === F && O.kind !== 'truck' && !O.ghost && (O as { st?: string }).st === 'out' && O.x > F.ox + LOTX - 2 && O.x < F.ox + LOTK + 1 && O.z > F.oz + LOTZ(NSIDE - 1) - 6 && O.z < F.oz + SVZ - 1);
+  // every car claims its slot at the west end of the drive behind the building, first come first served: free once no other car holds it or has
+  // claimed it (and, for the front slot, the rear car has gone: it leaves through the front slot). Until then it waits there, and the cars after
+  // it queue behind it along the back of the building; front0 counts only a car that has claimed
   const slotFree = (T: ArmouredCar, F: Office) => !trucks.some(O => O !== T && O.F === F && ((O.slot === T.slot && (O.st === 'load' || (O.st === 'back' && !O.ret) || (O.st === 'out' && O.cl))) ||
     (!T.slot && O.slot === 1 && (O.st === 'load' || (O.st === 'back' && !O.ret) || (O.st === 'out' && O.cl)))));
   const TVE = 9 * 1.3; // top speed of an empty armoured car on the street (a loaded one, like every other vehicle: 9)
@@ -43,13 +52,14 @@ export function makeArmouredCars(OS: OSAtArmouredCars) {
   // left turns (roads.ts truckNet): it waits for a real gap (traffic.ts leftOut, leftIn)
   function goOut(T: ArmouredCar, F: Office) { // out of the bay with a right turn (or a left one, waiting for a gap), over the streets to the office dock
     const b = BAYX(T.bay), az = outZ(T.bay), r = route('bank:out', F.id + ':in', 'truck'); if (!r) return false;
-    const lx = F.ox + slotX(T), L = mkLeg([...bayIn(T, az).reverse(), ...(rowOf(T.bay) ? arc(BOX + TR, az + TR, TR, -Math.PI / 2, -Math.PI, 6) : []), ...r, [lx + 3, F.oz + SVZ], [lx + 1.1, F.oz + LBZ], [lx, F.oz + LBZ]], { v: T.load.length ? 9 : TVE, end: () => { T.st = 'load'; T.tmr = .5; T.inb = false; } }); // stops in its slot of the lay-by, so the lane stays free
+    const L = mkLeg([...bayIn(T, az).reverse(), ...(rowOf(T.bay) ? arc(BOX + TR, az + TR, TR, -Math.PI / 2, -Math.PI, 6) : []), ...r, ...drive(T, F)], { v: T.load.length ? 9 : TVE, end: () => { T.st = 'load'; T.tmr = .5; T.inb = false; } }); // round the back of the building to its slot of the lay-by, so the forecourt stays free
     L.ev.push({ s: 0, fx: true, tag: 'bayout', wait: () => { if (!bayFree(T, false) || (!rowOf(T.bay) && b - BAYR <= BOX + 4.8 && sideBusy(T))) return false; T.rvg = OS.simT; T.mv = true; return true; } }); on(L, b - BAYR - 3.5, az, null, () => { T.rvg = 0; T.mv = false; }); // pulls out when its bay area is clear; others wait while it does
     for (let j = rowOf(T.bay) * BAYN; j <= T.bay - 3; j++) on(L, BAYX(j) + 3.2, az, () => !moving(T, j), null, null, true, 'outlane'); // on the out lane: waits east of a bay a car is reversing into right now
     if (rowOf(T.bay)) on(L, BOX, SIDEZ, () => !cornerBusy(T), null, null, true, 'westside'); else if (b - BAYR > BOX + 4.8) on(L, BOX + 4.8, AZ, () => !sideBusy(T), null, null, true, 'corner'); // (clear of the west side; from the bay by the out road it waits in its bay, see bayout)
     leftOut(L, BOX, STZ, T, r); leftIn(L, T, r);
-    T.cl = false; on(L, F.ox + SLIPX, F.oz + SVZ + 2.4, () => { if (T.cl) return true; if (!slotFree(T, F)) return false; T.cl = true; T.q = false; return true; }, null, null, true, 'slotq').fx = true;
-    on(L, F.ox + SLIPX, F.oz + SVZ + 2.4, () => !vehs.some(O => O.F === F && (O as { cm?: boolean }).cm), null, null, true, 'side'); // waits on the in road while a car from the side car park comes down to the forecourt lane (sports-car.ts)
+    T.cl = false; on(L, F.ox + SLIPX, F.oz + SVZ + 2.4, () => onDrive(T, F) < DRQ, null, null, true, 'drivefull'); // waits on the in road only while the back of the drive is full
+    on(L, F.ox + SLIPX, F.oz + SVZ + 2.4, () => !vehs.some(O => O.F === F && (O as { cm?: boolean }).cm) && !lotBusy(F), null, null, true, 'side');
+    on(L, F.ox - SLIPX + BDR + .3, F.oz + BDZ, () => { if (T.cl) return true; if (!slotFree(T, F)) return false; T.cl = true; T.q = false; return true; }, null, null, true, 'slotq').fx = true; // claims its slot at the back corner, before it turns down the west side // waits on the in road while a car from the side car park comes out of its spot or down to the forecourt lane (sports-car.ts)
     // (the out road is only a few metres from the avenue roundabout: the keep-clear box where it joins makes it wait until there is room past it, see traffic.ts)
     T.inb = true; T.legs.push(L); return true;
   }
@@ -65,7 +75,7 @@ export function makeArmouredCars(OS: OSAtArmouredCars) {
     return !vehs.some(O => O !== T && !O.ghost && !O.parked && O.k > .05 && !(O.kind === 'truck' && !O.mv && O.z < BAYZ + .3) && (O.z < AZ + 1.1 ? O.z > BAYZ - 1.5 && O.x > x0 - 1 && O.x < Math.min(x1 + 4.5, BIX - 1.2) : rev && O.z < BZ + 1.2 && O.x > b - 1.6 && O.x < b + 3)); };
   function goBack(T: ArmouredCar, F: Office) { // back over the streets, past the bay, then reverse into it
     const r = bldgs.get(F.id) === F && route(F.id + ':out', 'bank:in', 'truck'); if (!r) { sendHome(T); return; }
-    const L = mkLeg([[T.x, T.z], ...arc(F.ox + DOCKX - .3, F.oz + LBZ + 1.1, 1.1, -Math.PI / 2, -Math.PI, 6), ...r, ...(rowOf(T.bay) ? arc(BIX - TR, inZ(T.bay) + TR, TR, 0, -Math.PI / 2, 6) : []), [BAYX(T.bay) - BAYR, inZ(T.bay)]], { v: T.load.length ? 9 : TVE }); // row 1: north along the east side first // curves out of the lay-by onto the out road
+    const L = mkLeg([[T.x, T.z], ...r, ...(rowOf(T.bay) ? arc(BIX - TR, inZ(T.bay) + TR, TR, 0, -Math.PI / 2, 6) : []), [BAYX(T.bay) - BAYR, inZ(T.bay)]], { v: T.load.length ? 9 : TVE }); // row 1: north along the east side first // straight on out of the lay-by down the out road
     // leaves the lay-by as soon as the end of the forecourt lane is clear (from slot 1: and slot 0); the next car may come for this office at once.
     // It takes the forecourt lock, like a sports car backing out: the two meet where the lane turns onto the out road, so only one of them goes at a time
     // when only the lock holds it up it is next in line: a car still in its spot does not start backing out before it has gone
@@ -94,8 +104,8 @@ export function makeArmouredCars(OS: OSAtArmouredCars) {
       if (T.tmr <= 0) { if (T.load.length) { const c = T.load.pop()!; h0.set(T.x, 1.1, T.z); stackAt(clamp(Math.round(OS.stackShown), 0, STK - 1), h1); hop(h0, h1, c, null, .8); T.tmr = .16; } else { if (T.F && T.t0 != null) { const d = T.F.dock; d.trip = d.trip ? d.trip * .7 + (OS.simT - T.t0) * .3 : OS.simT - T.t0; } T.st = 'idle'; T.F = null; } } } // (the round trip, for dispatch)
     // the second guard steps off to the drive tray while loading
     T.gdk = damp(T.gdk, T.st === 'load' ? 1 : 0, 4, dt); const sn = Math.sin(T.rot), cs = Math.cos(T.rot), rx = T.x - sn * 1.95 + cs * .36, rz = T.z - cs * 1.95 - sn * .36;
-    const gx = F ? F.ox + (T.slot ? -8.6 : -9.3) : rx, gz = F ? F.oz + 8.6 : rz; // beside the drive pile
-    T.gd.position.set(rx + (gx - rx) * T.gdk, .39 * (1 - T.gdk) + .06 * T.gdk, rz + (gz - rz) * T.gdk); T.gd.rotation.y = T.gdk > .5 ? -Math.PI / 2 : T.rot; T.gd.scale.setScalar(Math.max(.001, T.k * T.gk));
+    const gx = F ? F.ox - 11.9 : rx, gz = F ? F.oz + (T.slot ? 6.3 : 7.65) : rz; // between the lay-by and the drive pile
+    T.gd.position.set(rx + (gx - rx) * T.gdk, .39 * (1 - T.gdk) + .06 * T.gdk, rz + (gz - rz) * T.gdk); T.gd.rotation.y = T.gdk > .5 ? Math.PI / 2 : T.rot; T.gd.scale.setScalar(Math.max(.001, T.k * T.gk));
   }
   // probe: why a loaded car still stands in its lay-by ('' when nothing holds it)
   const whyLay = (T: ArmouredCar) => !T.F ? '' : [!mergeClear(T.F, T) && 'merge', T.slot && !front0(T, T.F) && 'front0', T.F.lock.who && T.F.lock.who !== T && 'lock', T.F.lock.nx && T.F.lock.nx !== T && 'nx'].filter(Boolean).join('+');

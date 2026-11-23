@@ -16,7 +16,7 @@ type Corner = { x: number; z: number; arms: number[] };
 const SEED = Math.random();
 
 export function makeRoads(OS: OSAtRoads) {
-  const { bldgs, RO, RIN, RT, LA, LO, cy, sp, SLIPX, SVZ, CD, STZ, EX, BIX, BOX, BZ, AZ, PLZ, POX, bx, RW, mesh, merge, VC, BFW, BFX, BFZ, BBZ, PRZ, NSIDE, LOTZ, LOTK, LOTX, parkAt: park, lineX, PIX } = OS;
+  const { bldgs, RO, RIN, RT, LA, LO, cy, sp, SLIPX, SVZ, CD, STZ, EX, BIX, BOX, BZ, AZ, PLZ, POX, bx, RW, mesh, merge, VC, BFW, BFX, BFZ, BBZ, PRZ, NSIDE, LOTZ, LOTK, LOTX, BDZ, parkAt: park, lineX, PIX } = OS;
   const { scene } = OS.ctx;
   // ── road network: two lanes each way (keep right), two-lane roundabouts at the avenue, after every office and at the street ends ──
   // node ids: A<row> avenue roundabout, <id>:R the roundabout west of an office, E the east roundabout; on a roundabout <ring>:i<arm> / :o<arm>
@@ -102,7 +102,8 @@ export function makeRoads(OS: OSAtRoads) {
       [HOME_SITE.x + HOME_BOX.X0, HOME_SITE.x + HOME_BOX.X1, HOME_SITE.z + HOME_BOX.Z1, HOME_SITE.z]];
     const lz0 = LOTZ(NSIDE - 1) - 4.9; // the side car park's north edge (room to reverse out of the last spot)
     for (const S of OS.stns) if (S.k) lots.push([S.ox - 20.5, S.inX + 1.3, S.rz - 1.8, S.oz + 13.3]); // the extra police stations (police-station.ts): block, bays, yard (the sidewalk covers the verge, as at an office)
-    for (const F of bldgs.values()) lots.push([F.ox - 15.4, F.ox + 15.4, F.oz + 6.2, F.oz + 13.3], [F.ox - 9.6, F.ox + 9.6, F.oz - 8.2, F.oz + 6.6], [F.ox + 9.6, F.ox + LOTK + 1.3, F.oz + lz0 - .1, F.oz + 6.6]); // forecourt (the sidewalk covers its verge), building, side car park
+    for (const F of bldgs.values()) lots.push([F.ox - 15.4, F.ox + 15.4, F.oz + 6.2, F.oz + 13.3], [F.ox - 9.6, F.ox + 9.6, F.oz - 8.2, F.oz + 6.6], [F.ox + 9.6, F.ox + LOTK + 1.3, F.oz + lz0 - .1, F.oz + 6.6],
+      [F.ox - SLIPX - 2.2, F.ox + SLIPX + 1.6, F.oz + BDZ - 1.25, F.oz - 6], [F.ox - SLIPX - 2.2, F.ox - 9.5, F.oz + BDZ - 1.25, F.oz + 6.6]); // forecourt (the sidewalk covers its verge), building, side car park, the service drive round the back and down the west side (props.ts; it takes the verge of the street behind, not its sidewalk)
     const shop = (x: number, z: number) => { const dx = x - SHOP_SITE.x, dz = z - SHOP_SITE.z, lx = dx * cs - dz * sn, lz = dx * sn + dz * cs; return lx > -45.8 && lx < 14.8 && lz > -8.8 && lz < (lx < -26.8 ? 67.8 : 19.5); }; // the east leg and car park (front edge local z 19), the north leg with its service drive
     const lotQ = index(lots, b => [(b[0] + b[1]) / 2, (b[2] + b[3]) / 2, (b[1] - b[0]) / 2, (b[3] - b[2]) / 2]), ringQ = index(R, c => [c[0], c[1], ZB + 3]), crossQ = index(cross, k => [k[0], k[1], 1.9, 4.6]);
     const lot = (x: number, z: number) => lotQ(x, z).some(b => x > b[0] && x < b[1] && z > b[2] && z < b[3]) || shop(x, z);
@@ -403,8 +404,9 @@ export function makeRoads(OS: OSAtRoads) {
   function sirenNet() { if (SIR.key === OS.net.key) return SIR.E; const N = OS.net.N, E = new Map<string, NetEdge[]>(), add = (u: string, e: NetEdge) => { if (!E.has(u)) E.set(u, []); E.get(u)!.push(e); };
     const hin = new Map<string, number>(); for (const n of N.values()) for (const e of n.e) if (!e.t && !hin.has(e.to)) hin.set(e.to, hOf(e.pts, true));
     const hout = (id: string) => { const n = N.get(id); for (const e of n ? n.e : []) if (!e.t) return hOf(e.pts, false); return null; };
-    const entries: { id: string; x: number; z: number; h: number }[] = []; // roundabout entries, as targets for a left turn across the street
-    for (const [u, n] of N) for (const e of n.e) { if (!e.t || e.j) continue; const B = N.get(e.to)!; // (a junction has no island to cut over)
+    const entries: { id: string; x: number; z: number; h: number }[] = [], jEnt: typeof entries = []; // roundabout entries, as targets for a left turn across the street; junction entries (for a police station's out road only)
+    for (const [u, n] of N) for (const e of n.e) { if (e.j && hin.has(u) && !jEnt.some(p => p.id === u)) jEnt.push({ id: u, x: n.x, z: n.z, h: hin.get(u)! });
+      if (!e.t || e.j) continue; const B = N.get(e.to)!; // (a junction has no island to cut over)
       if (!entries.some(p => p.id === u) && hin.has(u)) entries.push({ id: u, x: n.x, z: n.z, h: hin.get(u)! });
       const h0 = hin.get(u), h3 = hout(e.to); if (h0 == null || h3 == null || e.t !== 'L') continue; // only a left turn (three quarters of the way round)
       const P = bez([n.x, n.z], h0, [B.x, B.z], h3, Math.hypot(B.x - n.x, B.z - n.z) / 3); add(u, { to: e.to, pts: P, len: plen(P), sc: 'island' }); } // over the island, past the lamp post in the middle
@@ -412,14 +414,17 @@ export function makeRoads(OS: OSAtRoads) {
     for (const [u, n] of N) { if (OS.ringAt(n.x, n.z)) continue; for (const e of n.e) { const J = N.get(e.to); if (!J || e.t || e.lc || OS.ringAt(J.x, J.z)) continue; const hj = hOf(e.pts, true), H = hIn(e.to);
       for (const f of J.e) { if (f.lc || f.t) continue; const ho = hOf(f.pts, false); if (Math.abs(OS.adiff(hj, ho)) < .8 || !H.some(g => g.e !== e && Math.abs(OS.adiff(g.h, ho)) < .3)) continue; // e joins a lane that runs on through J: e is an out road
         if (n.e.some(g => g !== e && N.get(g.to) && N.get(g.to)!.e.some(k => Math.abs(OS.adiff(hOf(k.pts, false), ho + Math.PI)) < .3))) continue; // it can already turn the other way
-        let best: TurnTarget | null = null, bs = Infinity; // the other way: a straight lane sample or a roundabout entry, 1..4.5 m across and 2..9 m on in its own direction
-        for (const p of [...entries, ...L] as TurnTarget[]) { if (Math.abs(OS.adiff(p.h, ho + Math.PI)) > .2 || (!p.id && (p.b! < 3 || OS.ringAt(p.x, p.z)))) continue; const dx = p.x - J.x, dz = p.z - J.z, al = dx * Math.sin(p.h) + dz * Math.cos(p.h), ac = Math.abs(dx * Math.cos(p.h) - dz * Math.sin(p.h));
-          if (ac < 1 || ac > 4.5 || al < 2 || al > 9) continue; const sc = Math.abs(al - 4.5) - (p.id ? 1 : 0); if (sc < bs) { bs = sc; best = p; } }
+        // the other way: a straight lane sample or a roundabout entry, 1..4.5 m across and 2..9 m on in its own direction. A police station's out road
+        // may also cut to a junction's entry up to 6.5 m across (the far lanes of a wide street), as well: else a unit called the other way drives round the block
+        const pol = /^pol[^:]*:out$/.test(u);
+        for (const [T, am] of (pol ? [[[...entries, ...L], 4.5], [jEnt, 6.5]] : [[[...entries, ...L], 4.5]]) as [TurnTarget[], number][]) { let best: TurnTarget | null = null, bs = Infinity;
+        for (const p of T) { if (Math.abs(OS.adiff(p.h, ho + Math.PI)) > .2 || (!p.id && (p.b! < 3 || OS.ringAt(p.x, p.z)))) continue; const dx = p.x - J.x, dz = p.z - J.z, al = dx * Math.sin(p.h) + dz * Math.cos(p.h), ac = Math.abs(dx * Math.cos(p.h) - dz * Math.sin(p.h));
+          if (ac < 1 || ac > am || al < 2 || al > 9) continue; const sc = Math.abs(al - 4.5) - (p.id ? 1 : 0); if (sc < bs) { bs = sc; best = p; } }
         if (!best) continue; const P = bez([n.x, n.z], hOf(e.pts, false), [best.x, best.z], best.h, Math.hypot(best.x - n.x, best.z - n.z) / 2.5);
         const w: SirenWait = [best.x, best.z, best.h, J.x - Math.sin(hj) * 2.4, J.z - Math.cos(hj) * 2.4]; // it waits at the line until the lane it joins is clear there
         if (best.id) { add(u, { to: best.id, pts: P, len: plen(P), w, sc: 'cut' }); continue; }
-        const v = 'x:' + best.x.toFixed(2) + ',' + best.z.toFixed(2), Q: P2[] = [[best.x, best.z], ...best.e!.pts.slice(best.i! + 1)]; add(u, { to: v, pts: P, len: plen(P), w, sc: 'cut' }); if (!E.has(v)) add(v, { to: best.e!.to, pts: Q, len: plen(Q) }); } } }
-    SIR = { key: OS.net.key, E }; return E; }
+        const v = 'x:' + best.x.toFixed(2) + ',' + best.z.toFixed(2), Q: P2[] = [[best.x, best.z], ...best.e!.pts.slice(best.i! + 1)]; add(u, { to: v, pts: P, len: plen(P), w, sc: 'cut' }); if (!E.has(v)) add(v, { to: best.e!.to, pts: Q, len: plen(Q) }); } } } }
+    SIR ={ key: OS.net.key, E }; return E; }
   // an armoured car's left turns (it has no lights to go first: it waits for a gap, armoured-car.ts): out of an office's or the bank's out road
   // across the near lanes into the far inner lane (sirenNet's out road cuts, sc 'cut'), and from the far inner lane, 4..12 m before the in road,
   // across the near lanes into an office's or the bank's in road (sc 'tin': it waits where that edge starts, in its lane)

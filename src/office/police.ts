@@ -7,7 +7,7 @@ import type { PatrolStation } from './patrol.js';
 import { HOME_SITE, HOME_BOX } from './buildings/apartments.js';
 
 export function makePolice(OS: OSAtPolice) {
-  const { col, mesh, G, VC, veh, route, plen, ringAt, vehs, bez, POX, STZ, RW, BFW, BFX, BFZ, bldgs, HZ, SVZ, RT, LA, SH, mkLeg, arc, PR, on, LO, siren, soonAt, place, EX, PRZ, mkFolk, walk, vanish, cy, pose, q, poseA, hits, MG, BLUE, RED, folk, LINE, stns, dropStation, dropVeh } = OS;
+  const { col, mesh, G, VC, veh, route, plen, ringAt, vehs, bez, POX, STZ, RW, BFW, BFX, BFZ, BBZ, bldgs, HZ, SVZ, RT, LA, SH, mkLeg, arc, PR, on, LO, siren, soonAt, place, EX, PRZ, mkFolk, walk, vanish, cy, pose, q, poseA, hits, MG, BLUE, RED, folk, LINE, stns, dropStation, dropVeh } = OS;
   // ── the police stations (police-station.ts; one more for every 20 offices): three patrol cars and a SWAT van each. Units leave forward onto
   // the yard lane and come back over the back lane, nose-in. A call goes to the nearest station with free units (else the next nearest);
   // its units drive home to their own station ──
@@ -67,11 +67,11 @@ export function makePolice(OS: OSAtPolice) {
     return best; };
   const lp = (s: LaneSample, lat: number, fwd: number): P2 => [s.x - Math.cos(s.h) * lat + Math.sin(s.h) * fwd, s.z + Math.sin(s.h) * lat + Math.cos(s.h) * fwd]; // a point beside a lane sample: lat to the right, fwd ahead
   // public road: not a station's own roads, not the bank yard, not a forecourt
-  function pub(x: number, z: number) { for (const S of stns) if (yardOf(S, x, z)) return false; if (x > BFW - .5 && x < BFX + .5 && z < BFZ + .3) return false;
+  function pub(x: number, z: number) { for (const S of stns) if (yardOf(S, x, z)) return false; if (x > BFW - .5 && x < BFX + .5 && z < BFZ + .3 && z > BBZ - .5) return false; // (the yard only: not the street behind the bank)
     if (x > HOME_SITE.x + HOME_BOX.X0 - .5 && x < HOME_SITE.x + HOME_BOX.X1 + .5 && z < HOME_SITE.z + .3) return false; // the apartments (its car park too)
     for (const F of bldgs.values()) if (Math.abs(x - F.ox) < 22 && z > F.oz - HZ - 1.5 && z < F.oz + SVZ + 1.2) return false; return true; } // (behind a building: up to 1.5 m from its back wall, so the shoulder of the street of the row in front stays public)
   function freeAt(x: number, z: number, e: NetEdge | null) { // free ground beside a lane: no other lane, roundabout, vehicle, fence or yard here
-    if (!pub(x, z) || (x > BFW - 1 && x < BFX + 1 && z < BFZ + .9)) return false; for (const c of rings(x, z)) if (Math.hypot(x - c[0], z - c[1]) < RT + 1.4) return false;
+    if (!pub(x, z) || (x > BFW - 1 && x < BFX + 1 && z < BFZ + .9 && z > BBZ - 1)) return false; for (const c of rings(x, z)) if (Math.hypot(x - c[0], z - c[1]) < RT + 1.4) return false;
     for (const O of vehs) if (!O.ghost && Math.hypot(O.x - x, O.z - z) < 1.7) return false;
     return !laneNear(x, z, e); }
   const spotOK = (s: LaneSample) => s.a >= 6 && s.b >= 3.5 && pub(s.x, s.z) && [-1.4, 0, 1.4, 2.4].every(k => { const [x, z] = lp(s, SH, k); return freeAt(x, z, s.e); }); // room to pull over, the car and the officer on free ground

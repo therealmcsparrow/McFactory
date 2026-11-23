@@ -112,6 +112,7 @@ export function buildOffice(ctx: SceneCtx, kit: OfficeKit): SceneApi {
   const dogCap = () => { try { return window.CWFun ? window.CWFun.get('dogWalkers') : DOG_DEFAULT; } catch (e) { return DOG_DEFAULT; } };
   const flatDoors = flats.doors.map(d => { const P = d.fromPavement.world.slice().reverse(), q = P[P.length - 1]; return { path: [...P, [q[0], HOME_SITE.z + 6.5 - OS.RW - .7] as P2] }; }); // door → pavement → the road's sidewalk
   let dogs: DogWalkers | null = null, dogKey: unknown = null, kidForce: number | null = null, dogN: number[] = [];
+  OS.feet = () => dogs ? dogs.feet() : []; // (traffic stops for anybody on foot in its way: a dropped kerb over an out road, a shop's drive)
   const kidCap = () => { try { return window.CWFun ? window.CWFun.get('kids') : 12; } catch (e) { return 12; } };
   let kidBusy = 3; const kidN = () => kidForce ?? Math.min(kidCap(), kidBusy); // the busyness says how many, the kids setting caps it (0: empty, the parents go too)
   window.addEventListener('cw-fun', e => { const d = (e as CustomEvent<{ key: string }>).detail; if (d && d.key === 'dogWalkers') dogs?.setMax(dogCap()); if (d && d.key === 'kids') kids.setCount(kidN()); });
@@ -139,6 +140,8 @@ export function buildOffice(ctx: SceneCtx, kit: OfficeKit): SceneApi {
     sirnet: () => { const r1 = (v: number) => +v.toFixed(1), N = OS.net.N, out: unknown[] = []; for (const [u, L] of OS.sirenNet() || []) for (const e of L) out.push([u, e.sc, e.to, e.pts[0].map(r1), e.pts[e.pts.length - 1].map(r1)]);
       return { out, pol: [...N.entries()].filter(([k, n]) => /^pol/.test(k) || Math.abs(n.x - OS.POX) < 14 && Math.abs(n.z - OS.STZ) < 8).map(([k, n]) => [k, r1(n.x), r1(n.z), n.e.map(e => [e.to, e.t || '', e.lc ? 'lc' : '', e.pts[e.pts.length - 1].map(r1)])]) }; }, // siren short cuts (probe)
     rings: () => OS.net.R.map(c => [+c[0].toFixed(1), +c[1].toFixed(1), c[4]]), // roundabouts [x, z, arms] (probe)
+    // vehs(): every vehicle drawn now: [kind, x, z, heading, speed, siren on, what it waits for, reversing] (probe)
+    vehs: () => vehs.filter(A => !A.ghost && A.k * A.gk > .05).map(A => [A.kind, +A.x.toFixed(2), +A.z.toFixed(2), +A.rot.toFixed(3), +A.v.toFixed(2), !!(A.unit && A.U && A.U.dir === 'out'), A.wr || '', !!(A.leg && A.leg.rev)]),
     junctions: () => (OS.net.J || []).map(j => [+j.x.toFixed(1), +j.z.toFixed(1), j.arms.join(''), j.lit ? 'lit' : '', j.main, OS.lightAt(j, 0)[0] + OS.lightAt(j, 1)[0]]), // T-junctions and crossings [x, z, arms, lit, main, lights] (probe)
     jams: () => { const r1 = (v: number) => +v.toFixed(1), tag = (A: AnyVehicle) => [A.kind, 'st' in A ? A.st : '', r1(A.x), r1(A.z), r1(A.wt || 0), r1(A.stuck), A.wr || '', A.kind === 'truck' ? A.bay : null];
       const front = (A: AnyVehicle) => { let f = A; for (let n = 0; f.by && n < 40; n++) f = f.by; return f; };

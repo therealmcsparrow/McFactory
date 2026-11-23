@@ -53,6 +53,7 @@ export interface DogWalkers {
   setMax: (n: number) => void;                    // 0..DOG_MAX, rounded
   frame: (dt: number, t: number) => void;
   stats: () => DogWalkerStats;
+  feet: () => number[];                            // walkers and dogs on the go, as x, z pairs (once a frame; traffic stops for them)
   dispose: () => void;
 }
 
@@ -352,7 +353,7 @@ export function makeDogWalkers(OS: DogsOS, net: WalkNet): DogWalkers {
   }
   // the dog keeps off the road (net.road, with ROAD_PAD to spare): stepped back towards the sidewalk's centre line (the owner, off the graph) until clear.
   // Not while its walker is on the road too (on a zebra, over a dropped kerb), nor on a zebra's stripes with the walker about to cross (not held at the kerb)
-  const ROAD_PAD = .12;
+  const ROAD_PAD = .4; // (a lane's half width and this: clear of a wide truck's mirror on the outer lane, not just of the paint)
   function zebOK(W: Walker) { return !W.zw && !!OS.zeb && OS.zeb.near(W.dog.x, W.dog.z, .2); }
   function offRoad(W: Walker) {
     const D = W.dog; if (!road || !road(D.x, D.z, ROAD_PAD) || road(W.x, W.z) || zebOK(W)) return;
@@ -398,7 +399,9 @@ export function makeDogWalkers(OS: DogsOS, net: WalkNet): DogWalkers {
   }
 
   setMax(DOG_DEFAULT);
+  const fc: { t: number; v: number[] } = { t: -1, v: [] }; // (the feet, kept for one frame: every vehicle asks)
   return { group, setMax, frame,
+    feet() { if (fc.t !== age) { fc.t = age; fc.v = []; for (const W of all) if (W.on && W.k > .3) fc.v.push(W.x, W.z, W.dog.x, W.dog.z); } return fc.v; },
     stats() { let active = 0, walking = 0, leaving = 0, chatting = 0, sniffing = 0, sitting = 0, min = Infinity, dmin = Infinity, gmin = Infinity;
       for (const W of all) { if (!W.on) continue; active++; if (W.k > .5) gmin = Math.min(gmin, gapTo(W.dog, W.x, W.z)); if (W.leaving) leaving++; if (W.state === 'chat') chatting++; else if (W.state === 'sniff') sniffing++; else if (W.state === 'stand') sitting++; else if (W.v > .05) walking++;
         for (const Q of all) if (Q.on && W.k > .5 && Q.k > .5) { dmin = Math.min(dmin, Math.hypot(W.dog.x - Q.x, W.dog.z - Q.z)); if (Q !== W) min = Math.min(min, Math.hypot(W.x - Q.x, W.z - Q.z)); } }

@@ -85,7 +85,10 @@ export function makeCrossings(OS: CrossOS): Crossings {
       for (const [M, b] of way(A)) { if (b && M === L) continue; for (const h of legHits(M)) { if (b + h.s1 < A.s - A.off - A.r) continue; if (b + h.s0 - nose > look) break;
           if (!busy(h.i) || b + h.s0 < nose - .05) continue; // nobody on it, or its nose is already over the stripes: on
           const s = b + h.s0 - A.off - A.r - .4; // nose .4 m before the stripes
-          if (legRings(M).some(([r0, r1]) => b + r1 > s - 2 * (A.off + A.r) && b + r0 < s)) continue; // never with its tail on a roundabout (the walker was told to wait)
+          // not with its tail on a roundabout or in a junction box: then before its line, if it can still brake for that; if not, before the stripes
+          // all the same (a tail on the ring for a moment beats driving over somebody: a walker may have stepped on when it was still far or slow)
+          const ring = legRings(M).find(([r0, r1]) => b + r1 > s - 2 * (A.off + A.r) && b + r0 < s);
+          if (ring) { const sl = b + ring[0] - A.off - A.r - .3; if (sl >= A.s && sl - A.s >= A.v * A.v / 12) { r = sl; zi = h.i; break; } }
           r = Math.max(A.s, s); zi = h.i; break; } if (r != null) break; } }
     const c = carW.get(A), now = OS.simT;
     if (r != null && r - A.s < 3 && A.v < .3) { if (!c || now - c.last > 1) { carW.set(A, { t0: now, last: now, i: zi }); st.stops++; } else { c.last = now; c.i = zi; } }

@@ -12,6 +12,21 @@
 - **Stop**: closing the window stops the sidecar. Sessions started from the dashboard see their input close and exit by themselves.
 - The dashboard is a page from `127.0.0.1` inside the window and gets no access to the Tauri API. Only the local loading page has Tauri's default core permissions.
 
+## Port and hooks
+
+The app and its sidecar listen on **`127.0.0.1:4545`** (loopback only). Set `MCFACTORY_PORT` to use another port; see [Testing next to a running server](#testing-next-to-a-running-server).
+
+Claude Code reaches the app through these global hooks in `~/.claude/settings.json`. `node server.js --install-hook` adds them (see [Answer prompts from the dashboard](permission-hook.md)):
+
+| Claude Code hook | Matcher | URL | Timeout | What it does |
+| --- | --- | --- | --- | --- |
+| `PermissionRequest` | none | `http://127.0.0.1:4545/hook/permission` | 300 s | Shows **Allow** / **Deny** for the prompt on the session's detail card. |
+| `PreToolUse` | `AskUserQuestion` | `http://127.0.0.1:4545/hook/pretool` | 86400 s | Shows the question as a form in the dashboard. Left out with `--install-hook --no-ask`. |
+
+These are the only hooks the app uses. Both are `http` hooks and fail open: when the app is closed, the terminal works as before.
+
+The one other entry the server writes to the settings file is a status line (not a hook), used to read your plan limits. See [Usage and plan limits](usage.md).
+
 ## Build it yourself
 
 You need Rust and Node.js 25.5 or later (for `--build-sea`).
