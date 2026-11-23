@@ -21,7 +21,7 @@ The entries it adds:
 ```json
 {"hooks":{
   "PermissionRequest":[{"hooks":[{"type":"http","url":"http://127.0.0.1:4545/hook/permission","timeout":300}]}],
-  "PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"http","url":"http://127.0.0.1:4545/hook/pretool","timeout":300}]}]
+  "PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"http","url":"http://127.0.0.1:4545/hook/pretool","timeout":86400}]}]
 }}
 ```
 

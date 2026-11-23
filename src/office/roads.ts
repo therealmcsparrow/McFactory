@@ -16,7 +16,7 @@ type Corner = { x: number; z: number; arms: number[] };
 const SEED = Math.random();
 
 export function makeRoads(OS: OSAtRoads) {
-  const { bldgs, RO, RIN, RT, LA, LO, cy, sp, SLIPX, SVZ, CD, STZ, EX, BIX, BOX, BZ, AZ, PLZ, POX, bx, RW, mesh, merge, VC, BFW, BFX, BFZ, BBZ, PRZ, NSIDE, LOTZ, LOTK, LOTX, parkAt: park, lineX, PIX } = OS;
+  const { bldgs, RO, RIN, RT, LA, LO, cy, sp, SLIPX, SVZ, CD, STZ, EX, BIX, BOX, BZ, AZ, PLZ, POX, bx, RW, mesh, merge, VC, BFW, BFX, BFZ, BBZ, PRZ, NSIDE, LOTZ, LOTK, LOTX, BDZ, parkAt: park, lineX, PIX } = OS;
   const { scene } = OS.ctx;
   // ── road network: two lanes each way (keep right), two-lane roundabouts at the avenue, after every office and at the street ends ──
   // node ids: A<row> avenue roundabout, <id>:R the roundabout west of an office, E the east roundabout; on a roundabout <ring>:i<arm> / :o<arm>
@@ -102,7 +102,8 @@ export function makeRoads(OS: OSAtRoads) {
       [HOME_SITE.x + HOME_BOX.X0, HOME_SITE.x + HOME_BOX.X1, HOME_SITE.z + HOME_BOX.Z1, HOME_SITE.z]];
     const lz0 = LOTZ(NSIDE - 1) - 4.9; // the side car park's north edge (room to reverse out of the last spot)
     for (const S of OS.stns) if (S.k) lots.push([S.ox - 20.5, S.inX + 1.3, S.rz - 1.8, S.oz + 13.3]); // the extra police stations (police-station.ts): block, bays, yard (the sidewalk covers the verge, as at an office)
-    for (const F of bldgs.values()) lots.push([F.ox - 15.4, F.ox + 15.4, F.oz + 6.2, F.oz + 13.3], [F.ox - 9.6, F.ox + 9.6, F.oz - 8.2, F.oz + 6.6], [F.ox + 9.6, F.ox + LOTK + 1.3, F.oz + lz0 - .1, F.oz + 6.6]); // forecourt (the sidewalk covers its verge), building, side car park
+    for (const F of bldgs.values()) lots.push([F.ox - 15.4, F.ox + 15.4, F.oz + 6.2, F.oz + 13.3], [F.ox - 9.6, F.ox + 9.6, F.oz - 8.2, F.oz + 6.6], [F.ox + 9.6, F.ox + LOTK + 1.3, F.oz + lz0 - .1, F.oz + 6.6],
+      [F.ox - SLIPX - 2.2, F.ox + SLIPX + 1.6, F.oz + BDZ - 1.25, F.oz - 6], [F.ox - SLIPX - 2.2, F.ox - 9.5, F.oz + BDZ - 1.25, F.oz + 6.6]); // forecourt (the sidewalk covers its verge), building, side car park, the service drive round the back and down the west side (props.ts; it takes the verge of the street behind, not its sidewalk)
     const shop = (x: number, z: number) => { const dx = x - SHOP_SITE.x, dz = z - SHOP_SITE.z, lx = dx * cs - dz * sn, lz = dx * sn + dz * cs; return lx > -45.8 && lx < 14.8 && lz > -8.8 && lz < (lx < -26.8 ? 67.8 : 19.5); }; // the east leg and car park (front edge local z 19), the north leg with its service drive
     const lotQ = index(lots, b => [(b[0] + b[1]) / 2, (b[2] + b[3]) / 2, (b[1] - b[0]) / 2, (b[3] - b[2]) / 2]), ringQ = index(R, c => [c[0], c[1], ZB + 3]), crossQ = index(cross, k => [k[0], k[1], 1.9, 4.6]);
     const lot = (x: number, z: number) => lotQ(x, z).some(b => x > b[0] && x < b[1] && z > b[2] && z < b[3]) || shop(x, z);

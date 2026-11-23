@@ -17,7 +17,7 @@ import { boxTruckGeometry, BOX_VARIANTS } from './vehicles/box-truck.js';
 import { legGeo, headGeo } from './gait.js';
 
 export function makeProps(OS: OSAtProps) {
-  const { BH, bx, BW, HZ, BD, HX, ring, cy, AISLE, merge, FL, SEATS, ROWZ, SLIPX, NSPOT, SPOTX, SPOTZ, LBZ, arrow, SVZ, sp, col, V, ctx } = OS;
+  const { BH, bx, BW, HZ, BD, HX, ring, cy, AISLE, merge, FL, SEATS, ROWZ, SLIPX, NSPOT, SPOTX, SPOTZ, BDZ, LB1, LOTX, arrow, SVZ, sp, col, V, ctx } = OS;
   const G = {} as OfficeGeo; // filled in the blocks below
   { // building shell: walls, roof, door, sign boards on poles (fades away when the building is open)
     const L = [], W1 = '#2b3342', W2 = '#3a4458', RF = '#1c2129', PL = '#59606c', SY = BH + 1.9;
@@ -67,7 +67,7 @@ export function makeProps(OS: OSAtProps) {
     G.glass = merge([bx(6.3, 1.5, .06, -5.55, .9, -2.1, '#fff'), bx(.06, 1.5, 4.1, -1.2, .9, -4.2, '#fff'),
       bx(2.7, 1.6, .06, 7.45, .95, -1.5, '#fff'), bx(2.7, 1.6, .06, 7.45, .95, 5.6, '#fff'), bx(.06, 1.6, 3, 6.1, .95, 0, '#fff'), bx(.06, 1.6, 3.1, 6.1, .95, 4.05, '#fff')]);
   }
-  { // outside: forecourt with an in road and an out road, car park, server dock
+  { // outside: forecourt with an in road and an out road, car park, server dock, the armoured cars' service drive round the back
     const L = [], LN = '#59606c', AS = '#1b2029';
     L.push(bx(30, .06, 6.8, 0, .03, 9.9, AS), bx(BW, .1, 1.1, 0, .05, HZ + .55, '#333945'), bx(23.6, .05, 1.5, 0, .025, 14.05, '#18251d'));
     for (const u of [-1, 1]) L.push(bx(2.8, .06, 1.6, u * SLIPX, .03, 14.05, AS), bx(.5, .05, 1.5, u * 14.85, .025, 14.05, '#18251d'));
@@ -75,7 +75,11 @@ export function makeProps(OS: OSAtProps) {
     for (const x of [9.5, 5.5, 1.5, -2.5, -11]) arrow(L, x, SVZ, 0, LN);
     arrow(L, SLIPX, 14, -Math.PI / 2, LN); arrow(L, -SLIPX, 14, Math.PI / 2, LN);
     L.push(bx(1.7, 2.2, 1, -7.9, 1.1, 7.55, '#12151b'), bx(1.8, .08, 1.1, -7.9, 2.24, 7.55, '#2a303a'), bx(2.6, .5, 1.3, -10.1, .25, 7.65, '#393f49'), bx(.08, .03, .5, -8.3, .075, 6.8, '#1d6c88')); // server, pallet for the drive pile, cable
-    for (let x = -13.2; x < -4.5; x += 1.2) L.push(bx(.7, .012, .06, x, .066, LBZ + 1.2, LN));                                                         // lay-by for two armoured cars, off the lane
+    // the service drive (layout.ts BDZ): along the back wall to the side car park's tarmac (and round its corner), down the west side to the
+    // forecourt; the lay-by for two armoured cars beside the drive pile (an edge line), arrows for the one way round
+    const DE = BDZ - 1.25; L.push(bx(SLIPX + 1 + SLIPX + 1.5, .04, -HZ - DE, (1 - 1.5) / 2, .02, (DE - HZ) / 2, AS), bx(3, .04, 6.5 - DE, -SLIPX, .02, (DE + 6.5) / 2, AS));
+    for (let z = LB1 - 2; z < SVZ - 2.8; z += 1.2) L.push(bx(.06, .012, .7, -SLIPX + 1.4, .066, z, LN));
+    arrow(L, 0, BDZ, 0, LN); arrow(L, -SLIPX, -2, Math.PI / 2, LN); arrow(L, LOTX + 1.7, -5.6, -Math.PI / 2, LN);
     G.outer = merge(L);
     const S = []; for (let r = 0; r < 6; r++) for (const x of [-8.45, -7.9, -7.35]) { const g = new THREE.PlaneGeometry(.4, .09); g.translate(x, .45 + r * .3, 8.06); S.push(g); }
     G.srv = mergeGeometries(S, false);

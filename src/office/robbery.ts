@@ -42,7 +42,7 @@ export function makeRobbery(OS: OSAtRobbery) {
     const x = ax + Math.sin(h) * a, z = az + Math.cos(h) * a;
     // not beside an office's forecourt: the scene stands on the shoulder (SH), only 1.55 m from the forecourt lane (SVZ), and the armoured cars there would stand stuck against it
     for (let d = -26; d <= 16; d += 2) { const px = x + Math.sin(h) * d, pz = z + Math.cos(h) * d;
-      for (const F of OS.bldgs.values()) if (px > F.ox + OS.DOCKX - 4 && px < F.ox + OS.SLIPX + 4 && pz > F.oz + OS.SVZ - 1 && pz < F.oz + OS.STZ) return null; }
+      for (const F of OS.bldgs.values()) if (px > F.ox - OS.SLIPX - 2.6 && px < F.ox + OS.SLIPX + 4 && pz > F.oz + OS.SVZ - 1 && pz < F.oz + OS.STZ) return null; }
     return { r: 0, h, x, z, u: C[0][0], v: C[C.length - 1][1].to, pts }; }
   // the stretches in a row of edges (a route): the longest runs of usable edges that go on in a line
   const runsOf = (es: Run) => { const out: Run[] = []; let cur: Run = []; for (const ue of es) { if (!okE(...ue)) { if (cur.length) out.push(cur); cur = []; continue; }

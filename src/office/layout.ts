@@ -35,7 +35,12 @@ export function makeLayout(OS: OSAtLayout) {
   const offCap = () => { try { return window.CWFun ? Math.max(1, Math.min(MAXOFF, window.CWFun.get('officeMax'))) : 50; } catch (e) { return 50; } }; // the officeMax setting
   const MAXROW = 4, MAXDESK = 8, MAXROOM = 8, MAXCLOSED = 6;
   const ROWZ = [-.9, .95, 2.8, 4.65], DESKX = (i: number) => 2.1 - (i - 1) * 1.55, AISLE = 7.6, TEAMX = 3.3;   // team desks 1..7; the manager's desk of the row is seat 0
-  const SPOTX = (i: number) => -2.6 + i * 1.65, NSPOT = 8, SPOTZ = 9.1, SVZ = 12.1, STZ = 18.6, SLIPX = 13.2, DOCKX = -11.8, DOCK1 = -6.4, LBZ = 9.7, MDOOR = 5.6; // parking spots, forecourt lane, street centre line, where the in and out roads meet the street, where the armoured cars stop (lay-by: front slot, rear slot)
+  const SPOTX = (i: number) => -2.6 + i * 1.65, NSPOT = 8, SPOTZ = 9.1, SVZ = 12.1, STZ = 18.6, SLIPX = 13.2, MDOOR = 5.6; // parking spots, forecourt lane, street centre line, where the in and out roads meet the street
+  // the armoured cars' service drive round the building (one way): up the side car park's aisle (SLIPX), west along the back of the building
+  // (BDZ, between its back wall and the next street's sidewalk), south down the west side on the out road's line (-SLIPX) to the lay-by
+  // beside the drive pile (front slot LB0, rear slot LB1: nose south, the front one nearest the out road), then straight on down the out road.
+  // BDR: the drive's corners
+  const BDZ = -7.9, BDR = 3.6, LB0 = 7, LB1 = 2.6;
   // the side car park east of the building (spots NSPOT .. NSPOT + NSIDE - 1): up the in road's line (SLIPX) past the forecourt, nose-in
   // to the east (kerb at LOTK), out by reversing into the lane at LOTX and down it to the forecourt lane; LOTZ: a side spot's z
   const NSIDE = 6, LOTZ = (j: number) => 5.2 - j * 1.65, LOTK = 18.4, LOTX = 11.5;
@@ -103,5 +108,5 @@ export function makeLayout(OS: OSAtLayout) {
   const VC = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .8, metalness: .05 });
   const HIT = new THREE.MeshBasicMaterial({ visible: false });
   const mesh = <G extends THREE.BufferGeometry, M extends THREE.Material | THREE.Material[]>(g: G, m: M, cast = true, recv = true) => { const o = new THREE.Mesh(g, m); o.castShadow = cast; o.receiveShadow = recv; return o; };
-  return { ground, V, col, dA, SLOTS, STNC, MAXOFF, cellX, lineX, offCap, CW, CD, OX0, BKX, BKZ, EX, BW, BD, BH, HX, HZ, FL, MAXROW, MAXDESK, MAXROOM, MAXCLOSED, ROWZ, DESKX, AISLE, TEAMX, SPOTX, NSPOT, SPOTZ, NSIDE, LOTZ, LOTK, LOTX, parkAt: park, SVZ, STZ, SLIPX, DOCKX, DOCK1, LBZ, MDOOR, LA, LO, LN2, RW, RO, RIN, RT, RY, RR, PKT_TOK, CARRY, TRAY, DOCKMAX, MAXTRUCK, BAYW, BAYX, BAYZ, BAYR, BAYN, BAYD, rowOf, bayZ, outZ, inZ, AZ, BZ, BIX, BOX, BFX, BFW, BFZ, BBZ, PLZ, POX, PR, PSZ, PRZ, PBAY, PDOOR, SH, PIX, LINGER, ISO, RI, UI, F0, st, updateSun, bx, cy, sp, ring, arrow, merge, VC, HIT, mesh };
+  return { ground, V, col, dA, SLOTS, STNC, MAXOFF, cellX, lineX, offCap, CW, CD, OX0, BKX, BKZ, EX, BW, BD, BH, HX, HZ, FL, MAXROW, MAXDESK, MAXROOM, MAXCLOSED, ROWZ, DESKX, AISLE, TEAMX, SPOTX, NSPOT, SPOTZ, NSIDE, LOTZ, LOTK, LOTX, parkAt: park, SVZ, STZ, SLIPX, BDZ, BDR, LB0, LB1, MDOOR, LA, LO, LN2, RW, RO, RIN, RT, RY, RR, PKT_TOK, CARRY, TRAY, DOCKMAX, MAXTRUCK, BAYW, BAYX, BAYZ, BAYR, BAYN, BAYD, rowOf, bayZ, outZ, inZ, AZ, BZ, BIX, BOX, BFX, BFW, BFZ, BBZ, PLZ, POX, PR, PSZ, PRZ, PBAY, PDOOR, SH, PIX, LINGER, ISO, RI, UI, F0, st, updateSun, bx, cy, sp, ring, arrow, merge, VC, HIT, mesh };
 }

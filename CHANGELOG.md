@@ -2,7 +2,11 @@
 
 All notable changes to this project are listed here.
 
-## Unreleased
+## 0.1.11 - 2026-11-23
+
+### Changed
+
+-   Office view: armoured cars no longer load on the forecourt. They come in by the in road and drive round the back of the office on a new one-way service drive, to a lay-by for two cars on the west side beside the dock, then drive straight out onto the out road. See [the office view](documentation/office-view.md).
 
 ### Fixed
 
