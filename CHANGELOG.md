@@ -2,6 +2,14 @@
 
 All notable changes to this project are listed here.
 
+## 0.1.12 - 2026-11-24
+
+### Fixed
+
+-   Chat panel layout:
+    -   The input row stays inside the panel when a form is shown, instead of being pushed out of view.
+    -   The chat log keeps its content size unless a form is open.
+
 ## 0.1.11 - 2026-11-23
 
 ### Changed
